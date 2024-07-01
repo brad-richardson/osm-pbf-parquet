@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex};
 
@@ -9,6 +10,7 @@ use clap::Parser;
 
 mod sink;
 use crate::sink::ElementSink;
+use crate::sink::OSMType;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -28,23 +30,33 @@ fn main() -> Result<(), io::Error> {
 
     // TODO - validation of args
     let reader = BlobReader::from_path(args.input)?;
-
-    let sinkpool: Arc<Mutex<Vec<ElementSink>>> = Arc::new(Mutex::new(vec![]));
-    let filenum: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
     let output_dir = args.output;
 
-    let get_sink_from_pool = || -> Result<ElementSink, std::io::Error> {
+    let sinkpools = HashMap::from([
+        (OSMType::Node, Arc::new(Mutex::new(vec![]))),
+        (OSMType::Way, Arc::new(Mutex::new(vec![]))),
+        (OSMType::Relation, Arc::new(Mutex::new(vec![]))),
+    ]);
+
+    let filenums = HashMap::from([
+        (OSMType::Node, Arc::new(Mutex::new(0))),
+        (OSMType::Way, Arc::new(Mutex::new(0))),
+        (OSMType::Relation, Arc::new(Mutex::new(0))),
+    ]);
+
+    let get_sink_from_pool = |osm_type: OSMType| -> Result<ElementSink, std::io::Error> {
         {
-            let mut pool = sinkpool.lock().unwrap();
+            let mut pool = sinkpools[&osm_type].lock().unwrap();
             if let Some(sink) = pool.pop() {
                 return Ok(sink);
             }
         }
-        ElementSink::new(filenum.clone(), output_dir.clone())
+        ElementSink::new(filenums[&osm_type].clone(), output_dir.clone(), osm_type)
     };
 
-    let add_sink_to_pool = |sink| {
-        let mut pool = sinkpool.lock().unwrap();
+    let add_sink_to_pool = |sink: ElementSink| {
+        let osm_type = sink.osm_type.clone();
+        let mut pool = sinkpools[&osm_type].lock().unwrap();
         pool.push(sink);
     };
 
@@ -52,32 +64,38 @@ fn main() -> Result<(), io::Error> {
         .par_bridge()
         .try_for_each(|blob| -> Result<(), io::Error> {
             if let BlobDecode::OsmData(block) = blob?.decode()? {
-                let mut sink = get_sink_from_pool()?;
+                let mut node_sink = get_sink_from_pool(OSMType::Node)?;
+                let mut way_sink = get_sink_from_pool(OSMType::Way)?;
+                let mut rel_sink = get_sink_from_pool(OSMType::Relation)?;
                 for elem in block.elements() {
                     match elem {
                         Element::Node(ref node) => {
-                            sink.add_node(node)?;
+                            node_sink.add_node(node)?;
                         }
                         Element::DenseNode(ref node) => {
-                            sink.add_dense_node(node)?;
+                            node_sink.add_dense_node(node)?;
                         }
                         Element::Way(ref way) => {
-                            sink.add_way(way)?;
+                            way_sink.add_way(way)?;
                         }
                         Element::Relation(ref rel) => {
-                            sink.add_relation(rel)?;
+                            rel_sink.add_relation(rel)?;
                         }
                     }
                 }
-                add_sink_to_pool(sink);
+                add_sink_to_pool(node_sink);
+                add_sink_to_pool(way_sink);
+                add_sink_to_pool(rel_sink);
             }
             Ok(())
         })?;
 
     {
-        let mut pool = sinkpool.lock().unwrap();
-        for mut sink in pool.drain(..) {
-            sink.finish_batch();
+        for (_, sinkpool) in &sinkpools {
+            let mut pool = sinkpool.lock().unwrap();
+            for mut sink in pool.drain(..) {
+                sink.finish_batch();
+            }
         }
     }
     Ok(())

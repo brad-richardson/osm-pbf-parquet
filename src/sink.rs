@@ -15,17 +15,29 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum OSMType {
+    Node,
+    Way,
+    Relation,
+}
+
 pub struct ElementSink {
     builders: Vec<Box<dyn ArrayBuilder>>,
     num_elements: u64,
     filenum: Arc<Mutex<u64>>,
     output_dir: String,
+    pub osm_type: OSMType,
 }
 
 impl ElementSink {
     const MAX_ELEMENTS_COUNT: u64 = 1_000_000;
 
-    pub fn new(filenum: Arc<Mutex<u64>>, output_dir: String) -> Result<Self, std::io::Error> {
+    pub fn new(
+        filenum: Arc<Mutex<u64>>,
+        output_dir: String,
+        osm_type: OSMType,
+    ) -> Result<Self, std::io::Error> {
         // `nds` ARRAY<STRUCT<ref: BIGINT>>,
         let nodes_builder = ListBuilder::new(StructBuilder::from_fields(
             vec![Field::new("ref", DataType::Int64, true)],
@@ -73,6 +85,7 @@ impl ElementSink {
             num_elements: 0,
             filenum,
             output_dir,
+            osm_type,
         })
     }
 
@@ -137,19 +150,33 @@ impl ElementSink {
 
     fn new_file_path(&self, filenum: &Arc<Mutex<u64>>) -> String {
         let mut num = filenum.lock().unwrap();
-        let path = format!("{}/elements_{:05}.parquet", self.output_dir, num);
+        let osm_type_str = match self.osm_type {
+            OSMType::Node => "node",
+            OSMType::Way => "way",
+            OSMType::Relation => "relation",
+        };
+        let path = format!(
+            "{}/type={}/{}_{:05}.parquet",
+            self.output_dir, osm_type_str, osm_type_str, num
+        );
         *num += 1;
         path
     }
 
     pub fn add_node(&mut self, node: &Node) -> Result<(), std::io::Error> {
         let info = node.info();
+        let user = info
+            .user()
+            .unwrap_or_else(|| Ok(""))
+            .unwrap_or("")
+            .to_string();
         self.append_feature_values(
             node.id(),
             "node".to_string(),
             info.changeset(),
             info.milli_timestamp(),
             info.uid(),
+            Some(user),
             info.version(),
             info.visible(),
         );
@@ -162,17 +189,28 @@ impl ElementSink {
 
     pub fn add_dense_node(&mut self, node: &DenseNode) -> Result<(), std::io::Error> {
         if let Some(info) = node.info() {
+            let user = info.user().unwrap_or("").to_string();
             self.append_feature_values(
                 node.id(),
                 "node".to_string(),
                 Some(info.changeset()),
                 Some(info.milli_timestamp()),
                 Some(info.uid()),
+                Some(user),
                 Some(info.version()),
                 info.visible(),
             );
         } else {
-            self.append_feature_values(node.id(), "node".to_string(), None, None, None, None, true);
+            self.append_feature_values(
+                node.id(),
+                "node".to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                true,
+            );
         }
 
         // Tags
@@ -206,12 +244,18 @@ impl ElementSink {
 
     pub fn add_way(&mut self, way: &Way) -> Result<(), std::io::Error> {
         let info = way.info();
+        let user = info
+            .user()
+            .unwrap_or_else(|| Ok(""))
+            .unwrap_or("")
+            .to_string();
         self.append_feature_values(
             way.id(),
             "way".to_string(),
             info.changeset(),
             info.milli_timestamp(),
             info.uid(),
+            Some(user),
             info.version(),
             info.visible(),
         );
@@ -240,12 +284,18 @@ impl ElementSink {
 
     pub fn add_relation(&mut self, relation: &Relation) -> Result<(), std::io::Error> {
         let info = relation.info();
+        let user = info
+            .user()
+            .unwrap_or_else(|| Ok(""))
+            .unwrap_or("")
+            .to_string();
         self.append_feature_values(
             relation.id(),
             "relation".to_string(),
             info.changeset(),
             info.milli_timestamp(),
             info.uid(),
+            Some(user),
             info.version(),
             info.visible(),
         );
@@ -288,10 +338,11 @@ impl ElementSink {
     fn append_feature_values<'a>(
         &mut self,
         id: i64,
-        feature_type: String,
+        feature_type: String, // Not currently using the member_type for flexibility
         changeset: Option<i64>,
         timestamp: Option<i64>,
         uid: Option<i32>,
+        user: Option<String>,
         version: Option<i32>,
         visible: bool,
     ) -> () {
@@ -356,13 +407,13 @@ impl ElementSink {
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .unwrap()
-            .append_null(); // TODO
+            .append_option(user);
         let _version_builder = self.builders[11]
             .as_any_mut()
             .downcast_mut::<Int32Builder>()
             .unwrap()
             .append_option(version);
-        let _type_builder = self.builders[12]
+        let _visible_builder = self.builders[12]
             .as_any_mut()
             .downcast_mut::<BooleanBuilder>()
             .unwrap()
