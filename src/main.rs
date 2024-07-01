@@ -3,16 +3,16 @@ use std::io;
 use std::sync::{Arc, Mutex};
 
 use arrow::array::builder::{
-    ArrayBuilder, BooleanBuilder, Int64Builder, ListBuilder, MapBuilder, StringBuilder,
-    StructBuilder,
+    ArrayBuilder, BooleanBuilder, Decimal128Builder, Int64Builder, ListBuilder, MapBuilder,
+    StringBuilder, StructBuilder,
 };
-use arrow::array::ArrayRef;
+use arrow::array::{ArrayRef, Int32Builder};
 use arrow::datatypes::DataType;
 use arrow::datatypes::Field;
+use arrow::datatypes::DECIMAL128_MAX_PRECISION;
 use arrow::record_batch::RecordBatch;
 use osmpbf::{
-    BlobDecode, BlobReader, DenseNode, Element, Node, RelMemberIter, RelMemberType, Relation,
-    TagIter, Way,
+    BlobDecode, BlobReader, DenseNode, Element, Node, RelMemberType, Relation, TagIter, Way,
 };
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -45,19 +45,6 @@ impl ElementSink {
             0,
         ));
 
-        // `id` BIGINT,
-        // `type` STRING,
-        // `tags` MAP <STRING, STRING>,
-        // `lat` DECIMAL(9, 7),
-        // `lon` DECIMAL(10, 7),
-        // `nds` ARRAY<STRUCT<ref: BIGINT>>,
-        // `members` ARRAY<STRUCT<type: STRING, ref: BIGINT, role: STRING>>,
-        // `changeset` BIGINT,
-        // `timestamp` TIMESTAMP,
-        // `uid` BIGINT,
-        // `user` STRING,
-        // `version` BIGINT,
-        // `visible` BOOLEAN
         let data_builders: Vec<Box<dyn ArrayBuilder>> = vec![
             Box::new(Int64Builder::new()),  // id
             Box::new(StringBuilder::new()), // type
@@ -66,15 +53,21 @@ impl ElementSink {
                 StringBuilder::new(),
                 StringBuilder::new(),
             )), // tags
-            Box::new(StringBuilder::new()), // lat
-            Box::new(StringBuilder::new()), // lon
+            Box::new(
+                Decimal128Builder::new()
+                    .with_data_type(DataType::Decimal128(DECIMAL128_MAX_PRECISION, 9)),
+            ), // lat
+            Box::new(
+                Decimal128Builder::new()
+                    .with_data_type(DataType::Decimal128(DECIMAL128_MAX_PRECISION, 9)),
+            ), // lon
             Box::new(nodes_builder),        // nds
             Box::new(members_builder),      // members
             Box::new(Int64Builder::new()),  // changeset
-            Box::new(StringBuilder::new()), // timestamp TODO
-            Box::new(Int64Builder::new()),  // uid
+            Box::new(Int64Builder::new()),  // timestamp
+            Box::new(Int32Builder::new()),  // uid
             Box::new(StringBuilder::new()), // user
-            Box::new(Int64Builder::new()),  // version
+            Box::new(Int32Builder::new()),  // version
             Box::new(BooleanBuilder::new()), // visible
         ];
 
@@ -94,11 +87,33 @@ impl ElementSink {
             .map(|builder| builder.finish())
             .collect();
 
+        // `id` BIGINT,
+        // `type` STRING,
+        // `tags` MAP <STRING, STRING>,
+        // `lat` DECIMAL(9, 7),
+        // `lon` DECIMAL(10, 7),
+        // `nds` ARRAY<STRUCT<ref: BIGINT>>,
+        // `members` ARRAY<STRUCT<type: STRING, ref: BIGINT, role: STRING>>,
+        // `changeset` BIGINT,
+        // `timestamp` TIMESTAMP,
+        // `uid` BIGINT,
+        // `user` STRING,
+        // `version` BIGINT,
+        // `visible` BOOLEAN
         let batch = RecordBatch::try_from_iter(vec![
             ("id", array_refs[0].clone()),
-            ("types", array_refs[1].clone()),
+            ("type", array_refs[1].clone()),
             ("tags", array_refs[2].clone()),
+            ("lat", array_refs[3].clone()),
+            ("lon", array_refs[4].clone()),
+            ("nds", array_refs[5].clone()),
             ("members", array_refs[6].clone()),
+            ("changeset", array_refs[7].clone()),
+            ("timestamp", array_refs[8].clone()),
+            ("uid", array_refs[9].clone()),
+            ("user", array_refs[10].clone()),
+            ("version", array_refs[11].clone()),
+            ("visible", array_refs[12].clone()),
         ])
         .unwrap();
 
@@ -130,57 +145,113 @@ impl ElementSink {
     }
 
     fn add_node(&mut self, node: &Node) -> Result<(), std::io::Error> {
+        let info = node.info();
+        self.append_feature_values(
+            node.id(),
+            "node".to_string(),
+            info.changeset(),
+            info.milli_timestamp(),
+            info.uid(),
+            info.version(),
+            info.visible(),
+        );
+
+        self.add_node_coords(node.nano_lat(), node.nano_lon());
+        self.add_tags(node.tags());
+
         self.increment_and_cycle()
     }
 
     fn add_dense_node(&mut self, node: &DenseNode) -> Result<(), std::io::Error> {
-        self.increment_and_cycle()
-    }
+        if let Some(info) = node.info() {
+            self.append_feature_values(
+                node.id(),
+                "node".to_string(),
+                Some(info.changeset()),
+                Some(info.milli_timestamp()),
+                Some(info.uid()),
+                Some(info.version()),
+                info.visible(),
+            );
+        } else {
+            self.append_feature_values(node.id(), "node".to_string(), None, None, None, None, true);
+        }
 
-    fn add_way(&mut self, way: &Way) -> Result<(), std::io::Error> {
-        // self.append_feature_values(way.id(), "way".to_string(), way.tags());
-        self.increment_and_cycle()
-    }
-
-    fn add_relation(&mut self, relation: &Relation) -> Result<(), std::io::Error> {
-        self.append_feature_values(
-            relation.id(),
-            "relation".to_string(),
-            relation.tags(),
-            relation.members(),
-        );
-
-        self.increment_and_cycle()
-    }
-
-    fn append_feature_values<'a>(
-        &mut self,
-        id: i64,
-        feature_type: String,
-        tag_iter: TagIter<'a>,
-        member_iter: RelMemberIter<'a>,
-    ) -> () {
-        // Result<(), std::io::Error> {
-        let _id_builder = self.builders[0]
-            .as_any_mut()
-            .downcast_mut::<Int64Builder>()
-            .unwrap()
-            .append_value(id);
-        let _type_builder = self.builders[1]
-            .as_any_mut()
-            .downcast_mut::<StringBuilder>()
-            .unwrap()
-            .append_value(feature_type);
-
+        // Tags
         let tags_builder = self.builders[2]
             .as_any_mut()
             .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
             .unwrap();
-        for (key, value) in tag_iter {
+        for (key, value) in node.tags() {
             tags_builder.keys().append_value(key.to_string());
             tags_builder.values().append_value(value.to_string());
         }
         let _ = tags_builder.append(true);
+
+        self.add_node_coords(node.nano_lat(), node.nano_lon());
+
+        self.increment_and_cycle()
+    }
+
+    fn add_node_coords(&mut self, lat: i64, lon: i64) {
+        self.builders[3]
+            .as_any_mut()
+            .downcast_mut::<Decimal128Builder>()
+            .unwrap()
+            .append_value(lat as i128);
+        self.builders[4]
+            .as_any_mut()
+            .downcast_mut::<Decimal128Builder>()
+            .unwrap()
+            .append_value(lon as i128);
+    }
+
+    fn add_way(&mut self, way: &Way) -> Result<(), std::io::Error> {
+        let info = way.info();
+        self.append_feature_values(
+            way.id(),
+            "way".to_string(),
+            info.changeset(),
+            info.milli_timestamp(),
+            info.uid(),
+            info.version(),
+            info.visible(),
+        );
+        self.add_tags(way.tags());
+
+        // Derived from https://docs.rs/arrow/latest/arrow/array/struct.StructBuilder.html
+        let nodes_builder = self.builders[5]
+            .as_any_mut()
+            .downcast_mut::<ListBuilder<StructBuilder>>()
+            .unwrap();
+
+        let struct_builder = nodes_builder.values();
+
+        for way_ref in way.refs() {
+            struct_builder
+                .field_builder::<Int64Builder>(0)
+                .unwrap()
+                .append_value(way_ref);
+            struct_builder.append(true);
+        }
+
+        nodes_builder.append(true);
+
+        self.increment_and_cycle()
+    }
+
+    fn add_relation(&mut self, relation: &Relation) -> Result<(), std::io::Error> {
+        let info = relation.info();
+        self.append_feature_values(
+            relation.id(),
+            "relation".to_string(),
+            info.changeset(),
+            info.milli_timestamp(),
+            info.uid(),
+            info.version(),
+            info.visible(),
+        );
+        self.add_tags(relation.tags());
 
         // Derived from https://docs.rs/arrow/latest/arrow/array/struct.StructBuilder.html
         let members_builder = self.builders[6]
@@ -190,7 +261,7 @@ impl ElementSink {
 
         let struct_builder = members_builder.values();
 
-        for member in member_iter {
+        for member in relation.members() {
             let type_builder = struct_builder.field_builder::<StringBuilder>(0).unwrap();
             match member.member_type {
                 RelMemberType::Node => type_builder.append_value("node"),
@@ -212,6 +283,104 @@ impl ElementSink {
         }
 
         members_builder.append(true);
+
+        self.increment_and_cycle()
+    }
+
+    fn append_feature_values<'a>(
+        &mut self,
+        id: i64,
+        feature_type: String,
+        changeset: Option<i64>,
+        timestamp: Option<i64>,
+        uid: Option<i32>,
+        version: Option<i32>,
+        visible: bool,
+    ) -> () {
+        // Logic by feature type
+        if feature_type != "node" {
+            // Lat/lon builders
+            self.builders[3]
+                .as_any_mut()
+                .downcast_mut::<Decimal128Builder>()
+                .unwrap()
+                .append_null();
+            self.builders[4]
+                .as_any_mut()
+                .downcast_mut::<Decimal128Builder>()
+                .unwrap()
+                .append_null();
+        }
+        if feature_type != "way" {
+            // Node builder
+            self.builders[5]
+                .as_any_mut()
+                .downcast_mut::<ListBuilder<StructBuilder>>()
+                .unwrap()
+                .append_null();
+        }
+        if feature_type != "relation" {
+            // Members builder
+            self.builders[6]
+                .as_any_mut()
+                .downcast_mut::<ListBuilder<StructBuilder>>()
+                .unwrap()
+                .append_null();
+        }
+
+        // Simple values
+        let _id_builder = self.builders[0]
+            .as_any_mut()
+            .downcast_mut::<Int64Builder>()
+            .unwrap()
+            .append_value(id);
+        let _type_builder = self.builders[1]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .unwrap()
+            .append_value(feature_type);
+        let _changeset_builder = self.builders[7]
+            .as_any_mut()
+            .downcast_mut::<Int64Builder>()
+            .unwrap()
+            .append_option(changeset); // TODO - always 0?
+        let _timestamp_builder = self.builders[8]
+            .as_any_mut()
+            .downcast_mut::<Int64Builder>()
+            .unwrap()
+            .append_option(timestamp);
+        let _uid_builder = self.builders[9]
+            .as_any_mut()
+            .downcast_mut::<Int32Builder>()
+            .unwrap()
+            .append_option(uid);
+        let _user_builder = self.builders[10]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .unwrap()
+            .append_null(); // TODO
+        let _version_builder = self.builders[11]
+            .as_any_mut()
+            .downcast_mut::<Int32Builder>()
+            .unwrap()
+            .append_option(version);
+        let _type_builder = self.builders[12]
+            .as_any_mut()
+            .downcast_mut::<BooleanBuilder>()
+            .unwrap()
+            .append_value(visible);
+    }
+
+    fn add_tags<'a>(&mut self, tag_iter: TagIter<'a>) -> () {
+        let tags_builder = self.builders[2]
+            .as_any_mut()
+            .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
+            .unwrap();
+        for (key, value) in tag_iter {
+            tags_builder.keys().append_value(key.to_string());
+            tags_builder.values().append_value(value.to_string());
+        }
+        let _ = tags_builder.append(true);
     }
 }
 
