@@ -1,0 +1,10 @@
+[package]
+name = "osm-pbf-parquet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrow = "52.0.0"
+osmpbf = "0.2"
+parquet = "52.0.0"
+rayon = "1.5.0"
