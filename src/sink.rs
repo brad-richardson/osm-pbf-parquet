@@ -19,12 +19,13 @@ pub struct ElementSink {
     builders: Vec<Box<dyn ArrayBuilder>>,
     num_elements: u64,
     filenum: Arc<Mutex<u64>>,
+    output_dir: String,
 }
 
 impl ElementSink {
     const MAX_ELEMENTS_COUNT: u64 = 1_000_000;
 
-    pub fn new(filenum: Arc<Mutex<u64>>) -> Result<Self, std::io::Error> {
+    pub fn new(filenum: Arc<Mutex<u64>>, output_dir: String) -> Result<Self, std::io::Error> {
         // `nds` ARRAY<STRUCT<ref: BIGINT>>,
         let nodes_builder = ListBuilder::new(StructBuilder::from_fields(
             vec![Field::new("ref", DataType::Int64, true)],
@@ -71,11 +72,12 @@ impl ElementSink {
             builders: data_builders,
             num_elements: 0,
             filenum,
+            output_dir,
         })
     }
 
     pub fn finish_batch(&mut self) -> () {
-        let file = File::create(Self::new_file_path(&self.filenum)).unwrap();
+        let file = File::create(self.new_file_path(&self.filenum)).unwrap();
 
         let array_refs: Vec<ArrayRef> = self
             .builders
@@ -133,9 +135,9 @@ impl ElementSink {
         Ok(())
     }
 
-    fn new_file_path(filenum: &Arc<Mutex<u64>>) -> String {
+    fn new_file_path(&self, filenum: &Arc<Mutex<u64>>) -> String {
         let mut num = filenum.lock().unwrap();
-        let path = format!("out/elements_{:05}.parquet", num);
+        let path = format!("{}/elements_{:05}.parquet", self.output_dir, num);
         *num += 1;
         path
     }

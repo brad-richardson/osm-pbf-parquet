@@ -5,19 +5,33 @@ use osmpbf::{BlobDecode, BlobReader, Element};
 use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
 
+use clap::Parser;
+
 mod sink;
 use crate::sink::ElementSink;
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Path to input PBF
+    #[arg(short, long)]
+    input: String,
+
+    /// Path to output directory
+    #[arg(short, long, default_value = "./")]
+    output: String,
+}
+
 fn main() -> Result<(), io::Error> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        println!("Need *.osm.pbf file as first argument.");
-        return Ok(());
-    }
-    let reader = BlobReader::from_path(&args[1])?;
+    let args = Args::parse();
+    println!("{:?}", args);
+
+    // TODO - validation of args
+    let reader = BlobReader::from_path(args.input)?;
 
     let sinkpool: Arc<Mutex<Vec<ElementSink>>> = Arc::new(Mutex::new(vec![]));
     let filenum: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
+    let output_dir = args.output;
 
     let get_sink_from_pool = || -> Result<ElementSink, std::io::Error> {
         {
@@ -26,7 +40,7 @@ fn main() -> Result<(), io::Error> {
                 return Ok(sink);
             }
         }
-        ElementSink::new(filenum.clone())
+        ElementSink::new(filenum.clone(), output_dir.clone())
     };
 
     let add_sink_to_pool = |sink| {
