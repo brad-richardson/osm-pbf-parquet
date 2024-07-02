@@ -1,19 +1,6 @@
 use std::fs::File;
 use std::sync::{Arc, Mutex};
 
-use arrow::array::builder::{
-    ArrayBuilder, BooleanBuilder, Decimal128Builder, Int64Builder, ListBuilder, MapBuilder,
-    StringBuilder, StructBuilder,
-};
-use arrow::array::{make_builder, ArrayRef, Int32Builder};
-use arrow::datatypes::DataType;
-use arrow::datatypes::Field;
-use arrow::datatypes::Fields;
-use arrow::datatypes::Schema;
-use arrow::datatypes::DECIMAL128_MAX_PRECISION;
-use arrow::error::ArrowError;
-use arrow::ipc::FieldBuilder;
-use arrow::record_batch::RecordBatch;
 use osmpbf::{DenseNode, Node, RelMemberType, Relation, TagIter, Way};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;

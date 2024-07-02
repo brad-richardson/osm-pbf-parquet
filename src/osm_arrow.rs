@@ -1,5 +1,4 @@
-use std::fs::File;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 
 use arrow::array::builder::{
     ArrayBuilder, BooleanBuilder, Decimal128Builder, Int64Builder, ListBuilder, MapBuilder,
@@ -12,12 +11,7 @@ use arrow::datatypes::Fields;
 use arrow::datatypes::Schema;
 use arrow::datatypes::DECIMAL128_MAX_PRECISION;
 use arrow::error::ArrowError;
-use arrow::ipc::FieldBuilder;
 use arrow::record_batch::RecordBatch;
-use osmpbf::{DenseNode, Node, RelMemberType, Relation, TagIter, Way};
-use parquet::arrow::ArrowWriter;
-use parquet::basic::Compression;
-use parquet::file::properties::WriterProperties;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum OSMType {
