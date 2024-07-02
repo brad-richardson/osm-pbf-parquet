@@ -1,4 +1,4 @@
-use std::sync::{Arc};
+use std::sync::Arc;
 
 use arrow::array::builder::{
     ArrayBuilder, BooleanBuilder, Decimal128Builder, Int64Builder, ListBuilder, MapBuilder,
@@ -35,7 +35,7 @@ pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema 
     // `user` STRING,
     // `version` BIGINT,
     // `visible` BOOLEAN
-    return Schema::new(vec![
+    Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("type", DataType::Utf8, false),
         Field::new(
@@ -81,7 +81,7 @@ pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema 
         Field::new("user", DataType::Utf8, true),
         Field::new("version", DataType::Int32, true),
         Field::new("visible", DataType::Boolean, true),
-    ]);
+    ])
 }
 
 pub struct OSMArrowBuilder {
@@ -92,7 +92,7 @@ impl OSMArrowBuilder {
     const DEFAULT_DECIMAL_SCALE: i8 = 9;
 
     pub fn new() -> Self {
-        return Self::new_params(Self::DEFAULT_DECIMAL_SCALE, Self::DEFAULT_DECIMAL_SCALE);
+        Self::new_params(Self::DEFAULT_DECIMAL_SCALE, Self::DEFAULT_DECIMAL_SCALE)
     }
 
     pub fn new_params(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Self {
@@ -145,7 +145,7 @@ impl OSMArrowBuilder {
         version: Option<i32>,
         visible: Option<bool>,
     ) {
-        let _id_builder = self.builders[0]
+        self.builders[0]
             .as_any_mut()
             .downcast_mut::<Int64Builder>()
             .unwrap()
@@ -156,7 +156,7 @@ impl OSMArrowBuilder {
             OSMType::Way => "way",
             OSMType::Relation => "relation",
         };
-        let _type_builder = self.builders[1]
+        self.builders[1]
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .unwrap()
@@ -172,12 +172,12 @@ impl OSMArrowBuilder {
         }
         let _ = tags_builder.append(true);
 
-        let _lat_builder = self.builders[3]
+        self.builders[3]
             .as_any_mut()
             .downcast_mut::<Decimal128Builder>()
             .unwrap()
             .append_option(lat);
-        let _lon_builder = self.builders[4]
+        self.builders[4]
             .as_any_mut()
             .downcast_mut::<Decimal128Builder>()
             .unwrap()
@@ -234,32 +234,32 @@ impl OSMArrowBuilder {
 
         members_builder.append(true);
 
-        let _changeset_builder = self.builders[7]
+        self.builders[7]
             .as_any_mut()
             .downcast_mut::<Int64Builder>()
             .unwrap()
             .append_option(changeset);
-        let _timestamp_builder = self.builders[8]
+        self.builders[8]
             .as_any_mut()
             .downcast_mut::<Int64Builder>()
             .unwrap()
             .append_option(timestamp_ms);
-        let _uid_builder = self.builders[9]
+        self.builders[9]
             .as_any_mut()
             .downcast_mut::<Int32Builder>()
             .unwrap()
             .append_option(uid);
-        let _user_builder = self.builders[10]
+        self.builders[10]
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .unwrap()
             .append_option(user);
-        let _version_builder = self.builders[11]
+        self.builders[11]
             .as_any_mut()
             .downcast_mut::<Int32Builder>()
             .unwrap()
             .append_option(version);
-        let _visible_builder = self.builders[12]
+        self.builders[12]
             .as_any_mut()
             .downcast_mut::<BooleanBuilder>()
             .unwrap()
@@ -281,6 +281,6 @@ impl OSMArrowBuilder {
             .zip(array_refs.iter())
             .map(|(field, array)| (field.name(), array.clone()));
 
-        return RecordBatch::try_from_iter(field_arrays_iter);
+        RecordBatch::try_from_iter(field_arrays_iter)
     }
 }

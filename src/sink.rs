@@ -35,7 +35,7 @@ impl ElementSink {
         })
     }
 
-    pub fn finish_batch(&mut self) -> () {
+    pub fn finish_batch(&mut self) {
         let file = File::create(self.new_file_path(&self.filenum)).unwrap();
 
         let batch = self.osm_builder.finish().unwrap();
@@ -206,11 +206,11 @@ impl ElementSink {
         self.increment_and_cycle()
     }
 
-    fn process_tags<'a>(tag_iter: TagIter<'a>) -> Vec<(String, String)> {
+    fn process_tags(tag_iter: TagIter<'_>) -> Vec<(String, String)> {
         let mut tags = Vec::new();
         for (key, value) in tag_iter {
             tags.push((key.to_string(), value.to_string()));
         }
-        return tags;
+        tags
     }
 }

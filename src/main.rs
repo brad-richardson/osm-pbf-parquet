@@ -92,7 +92,7 @@ fn main() -> Result<(), io::Error> {
         })?;
 
     {
-        for (_, sinkpool) in &sinkpools {
+        for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {
                 sink.finish_batch();
