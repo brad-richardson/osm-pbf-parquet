@@ -9,8 +9,9 @@ use rayon::iter::ParallelIterator;
 use clap::Parser;
 
 mod sink;
+mod osm_arrow;
 use crate::sink::ElementSink;
-use crate::sink::OSMType;
+use crate::osm_arrow::OSMType;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
