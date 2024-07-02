@@ -6,12 +6,12 @@ use arrow::array::builder::{
     StringBuilder, StructBuilder,
 };
 use arrow::array::{make_builder, ArrayRef, Int32Builder};
-use arrow::error::ArrowError;
 use arrow::datatypes::DataType;
 use arrow::datatypes::Field;
 use arrow::datatypes::Fields;
-use arrow::datatypes::DECIMAL128_MAX_PRECISION;
 use arrow::datatypes::Schema;
+use arrow::datatypes::DECIMAL128_MAX_PRECISION;
+use arrow::error::ArrowError;
 use arrow::ipc::FieldBuilder;
 use arrow::record_batch::RecordBatch;
 use osmpbf::{DenseNode, Node, RelMemberType, Relation, TagIter, Way};
@@ -44,24 +44,43 @@ pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema 
     return Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("type", DataType::Utf8, false),
-        Field::new("tags", DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Utf8)), true),
-        Field::new("lat", DataType::Decimal128(DECIMAL128_MAX_PRECISION, lat_decimal_scale), true),
-        Field::new("lon", DataType::Decimal128(DECIMAL128_MAX_PRECISION, lon_decimal_scale), true),
-        Field::new("nds", DataType::List(Arc::new(Field::new(
-            "item",
-            DataType::Struct(Fields::from(vec![Field::new("ref", DataType::Int64, true)
-            ]))
-        , true))), true),
-        Field::new("members", DataType::List(Arc::new(Field::new(
-            "item",
-            DataType::Struct(
-                Fields::from(vec![
+        Field::new(
+            "tags",
+            DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Utf8)),
+            true,
+        ),
+        Field::new(
+            "lat",
+            DataType::Decimal128(DECIMAL128_MAX_PRECISION, lat_decimal_scale),
+            true,
+        ),
+        Field::new(
+            "lon",
+            DataType::Decimal128(DECIMAL128_MAX_PRECISION, lon_decimal_scale),
+            true,
+        ),
+        Field::new(
+            "nds",
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Struct(Fields::from(vec![Field::new("ref", DataType::Int64, true)])),
+                true,
+            ))),
+            true,
+        ),
+        Field::new(
+            "members",
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Struct(Fields::from(vec![
                     Field::new("type", DataType::Utf8, true),
                     Field::new("ref", DataType::Int64, true),
                     Field::new("role", DataType::Utf8, true),
-                ])
-            ), true
-        ))), true),
+                ])),
+                true,
+            ))),
+            true,
+        ),
         Field::new("changeset", DataType::Int64, true),
         Field::new("timestamp", DataType::Int64, true),
         Field::new("uid", DataType::Int32, true),
@@ -113,12 +132,11 @@ impl OSMArrowBuilder {
             }
         }
 
-        OSMArrowBuilder {
-            builders
-        }
+        OSMArrowBuilder { builders }
     }
 
-    pub fn append_row(&mut self,
+    pub fn append_row(
+        &mut self,
         id: i64,
         type_: OSMType,
         tags: Vec<(String, String)>,
@@ -131,8 +149,8 @@ impl OSMArrowBuilder {
         uid: Option<i32>,
         user: Option<String>,
         version: Option<i32>,
-        visible: Option<bool>) {
-
+        visible: Option<bool>,
+    ) {
         let _id_builder = self.builders[0]
             .as_any_mut()
             .downcast_mut::<Int64Builder>()
@@ -159,7 +177,7 @@ impl OSMArrowBuilder {
             tags_builder.values().append_value(value);
         }
         let _ = tags_builder.append(true);
-        
+
         let _lat_builder = self.builders[3]
             .as_any_mut()
             .downcast_mut::<Decimal128Builder>()
@@ -198,7 +216,9 @@ impl OSMArrowBuilder {
         let members_struct_builder = members_builder.values();
 
         for (osm_type, ref_, role) in members.unwrap_or_default() {
-            let type_builder = members_struct_builder.field_builder::<StringBuilder>(0).unwrap();
+            let type_builder = members_struct_builder
+                .field_builder::<StringBuilder>(0)
+                .unwrap();
             match osm_type {
                 OSMType::Node => type_builder.append_value("node"),
                 OSMType::Way => type_builder.append_value("way"),
@@ -210,9 +230,11 @@ impl OSMArrowBuilder {
                 .unwrap()
                 .append_value(ref_);
 
-            members_struct_builder.field_builder::<StringBuilder>(2).unwrap()
-            .append_option(role);
-        
+            members_struct_builder
+                .field_builder::<StringBuilder>(2)
+                .unwrap()
+                .append_option(role);
+
             members_struct_builder.append(true);
         }
 
@@ -250,7 +272,7 @@ impl OSMArrowBuilder {
             .append_option(visible);
     }
 
-    pub fn finish(&mut self) -> Result<RecordBatch, ArrowError>  {
+    pub fn finish(&mut self) -> Result<RecordBatch, ArrowError> {
         let array_refs: Vec<ArrayRef> = self
             .builders
             .iter_mut()
@@ -259,9 +281,12 @@ impl OSMArrowBuilder {
 
         let schema = osm_arrow_schema(Self::DEFAULT_DECIMAL_SCALE, Self::DEFAULT_DECIMAL_SCALE);
 
-        let field_arrays_iter = schema.fields().iter().zip(array_refs.iter()).map(|(field, array)| (field.name(), array.clone()));
+        let field_arrays_iter = schema
+            .fields()
+            .iter()
+            .zip(array_refs.iter())
+            .map(|(field, array)| (field.name(), array.clone()));
 
         return RecordBatch::try_from_iter(field_arrays_iter);
     }
-
 }

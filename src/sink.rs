@@ -6,12 +6,12 @@ use arrow::array::builder::{
     StringBuilder, StructBuilder,
 };
 use arrow::array::{make_builder, ArrayRef, Int32Builder};
-use arrow::error::ArrowError;
 use arrow::datatypes::DataType;
 use arrow::datatypes::Field;
 use arrow::datatypes::Fields;
-use arrow::datatypes::DECIMAL128_MAX_PRECISION;
 use arrow::datatypes::Schema;
+use arrow::datatypes::DECIMAL128_MAX_PRECISION;
+use arrow::error::ArrowError;
 use arrow::ipc::FieldBuilder;
 use arrow::record_batch::RecordBatch;
 use osmpbf::{DenseNode, Node, RelMemberType, Relation, TagIter, Way};
@@ -39,7 +39,6 @@ impl ElementSink {
         output_dir: String,
         osm_type: OSMType,
     ) -> Result<Self, std::io::Error> {
-
         Ok(ElementSink {
             osm_builder: Box::new(OSMArrowBuilder::new()),
             num_elements: 0,
@@ -142,7 +141,6 @@ impl ElementSink {
             user,
             info.map(|info| info.version()),
             info.map(|info| info.visible()),
-        
         );
         self.increment_and_cycle()
     }
