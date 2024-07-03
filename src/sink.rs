@@ -36,7 +36,11 @@ impl ElementSink {
     }
 
     pub fn finish_batch(&mut self) {
-        let file = File::create(self.new_file_path(&self.filenum)).unwrap();
+        let path_str = self.new_file_path(&self.filenum);
+        let path = std::path::Path::new(&path_str);
+        let prefix = path.parent().unwrap();
+        std::fs::create_dir_all(prefix).unwrap();
+        let file = File::create(path).unwrap();
 
         let batch = self.osm_builder.finish().unwrap();
 
