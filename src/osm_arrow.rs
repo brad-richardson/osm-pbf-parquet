@@ -23,7 +23,6 @@ pub enum OSMType {
 pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema {
     // Derived from this schema:
     // `id` BIGINT,
-    // `type` STRING,
     // `tags` MAP <STRING, STRING>,
     // `lat` DECIMAL(9, 7),
     // `lon` DECIMAL(10, 7),
@@ -35,9 +34,13 @@ pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema 
     // `user` STRING,
     // `version` BIGINT,
     // `visible` BOOLEAN
+
+    // TODO - add type field when not writing with partitions
+    // `type` STRING
+    // Field::new("type", DataType::Utf8, false)
+    
     Schema::new(vec![
         Field::new("id", DataType::Int64, false),
-        Field::new("type", DataType::Utf8, false),
         Field::new(
             "tags",
             DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Utf8)),
@@ -132,7 +135,7 @@ impl OSMArrowBuilder {
     pub fn append_row(
         &mut self,
         id: i64,
-        type_: OSMType,
+        _type_: OSMType,
         tags: Vec<(String, String)>,
         lat: Option<i128>,
         lon: Option<i128>,
@@ -151,18 +154,7 @@ impl OSMArrowBuilder {
             .unwrap()
             .append_value(id);
 
-        let feature_type = match type_ {
-            OSMType::Node => "node",
-            OSMType::Way => "way",
-            OSMType::Relation => "relation",
-        };
-        self.builders[1]
-            .as_any_mut()
-            .downcast_mut::<StringBuilder>()
-            .unwrap()
-            .append_value(feature_type);
-
-        let tags_builder = self.builders[2]
+        let tags_builder = self.builders[1]
             .as_any_mut()
             .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
             .unwrap();
@@ -172,19 +164,19 @@ impl OSMArrowBuilder {
         }
         let _ = tags_builder.append(true);
 
-        self.builders[3]
+        self.builders[2]
             .as_any_mut()
             .downcast_mut::<Decimal128Builder>()
             .unwrap()
             .append_option(lat);
-        self.builders[4]
+        self.builders[3]
             .as_any_mut()
             .downcast_mut::<Decimal128Builder>()
             .unwrap()
             .append_option(lon);
 
         // Derived from https://docs.rs/arrow/latest/arrow/array/struct.StructBuilder.html
-        let nodes_builder = self.builders[5]
+        let nodes_builder = self.builders[4]
             .as_any_mut()
             .downcast_mut::<ListBuilder<StructBuilder>>()
             .unwrap();
@@ -202,7 +194,7 @@ impl OSMArrowBuilder {
         nodes_builder.append(true);
 
         // Derived from https://docs.rs/arrow/latest/arrow/array/struct.StructBuilder.html
-        let members_builder = self.builders[6]
+        let members_builder = self.builders[5]
             .as_any_mut()
             .downcast_mut::<ListBuilder<StructBuilder>>()
             .unwrap();
@@ -234,36 +226,49 @@ impl OSMArrowBuilder {
 
         members_builder.append(true);
 
-        self.builders[7]
+        self.builders[6]
             .as_any_mut()
             .downcast_mut::<Int64Builder>()
             .unwrap()
             .append_option(changeset);
-        self.builders[8]
+        self.builders[7]
             .as_any_mut()
             .downcast_mut::<Int64Builder>()
             .unwrap()
             .append_option(timestamp_ms);
-        self.builders[9]
+        self.builders[8]
             .as_any_mut()
             .downcast_mut::<Int32Builder>()
             .unwrap()
             .append_option(uid);
-        self.builders[10]
+        self.builders[9]
             .as_any_mut()
             .downcast_mut::<StringBuilder>()
             .unwrap()
             .append_option(user);
-        self.builders[11]
+        self.builders[10]
             .as_any_mut()
             .downcast_mut::<Int32Builder>()
             .unwrap()
             .append_option(version);
-        self.builders[12]
+        self.builders[11]
             .as_any_mut()
             .downcast_mut::<BooleanBuilder>()
             .unwrap()
             .append_option(visible);
+
+
+        // let feature_type = match type_ {
+        //     OSMType::Node => "node",
+        //     OSMType::Way => "way",
+        //     OSMType::Relation => "relation",
+        // };
+        // // TODO - write this if not writing with partitions
+        // self.builders[12]
+        //     .as_any_mut()
+        //     .downcast_mut::<StringBuilder>()
+        //     .unwrap()
+        //     .append_value(feature_type);
     }
 
     pub fn finish(&mut self) -> Result<RecordBatch, ArrowError> {
