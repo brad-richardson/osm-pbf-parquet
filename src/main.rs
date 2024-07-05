@@ -21,7 +21,7 @@ struct Args {
     input: String,
 
     /// Path to output directory
-    #[arg(short, long, default_value = "./")]
+    #[arg(short, long, default_value = "./parquet")]
     output: String,
 }
 
