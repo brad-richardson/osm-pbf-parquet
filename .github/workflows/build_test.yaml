@@ -14,8 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
     - name: Build
-      run: cargo build --verbose
+      run: cargo build
     - name: Install osmium
       run: sudo apt install osmium-tool
     - name: Install python test dependencies

@@ -10,4 +10,4 @@ curl -L "https://download.geofabrik.de/australia-oceania/cook-islands-latest.osm
 osmium cat cook-islands-latest.osm.pbf -o cook-islands-latest.osm
 
 # Run parquet conversion
-cargo run --release -- --input cook-islands-latest.osm.pbf --output ./parquet/
+cargo run -- --input cook-islands-latest.osm.pbf --output ./parquet/
