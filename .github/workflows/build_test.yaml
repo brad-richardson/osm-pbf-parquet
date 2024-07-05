@@ -19,7 +19,7 @@ jobs:
     - name: Install python test dependencies
       run: cd test && pip3 install -r requirements.txt
     - name: Install osmium
-      run: apt install osmium-tool
+      run: sudo apt install osmium-tool
     - name: Prepare test files
       run: ./prepare.sh
     - name: Run test
