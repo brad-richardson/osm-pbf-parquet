@@ -16,11 +16,14 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
-    - name: Install python test dependencies
-      run: cd test && pip3 install -r requirements.txt
     - name: Install osmium
       run: sudo apt install osmium-tool
+    - name: Install python test dependencies
+      working-directory: ./test
+      run: pip3 install -r requirements.txt
     - name: Prepare test files
       run: ./prepare.sh
+      working-directory: ./test
     - name: Run test
+      working-directory: ./test
       run: python3 ./validate.py
