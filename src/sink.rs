@@ -19,7 +19,8 @@ pub struct ElementSink {
 }
 
 impl ElementSink {
-    const MAX_ELEMENTS_COUNT: u64 = 1_000_000;
+    const MAX_NODES_COUNT: u64 = 5_000_000;
+    const MAX_WAY_RELATION_COUNT: u64 = 500_000;
 
     pub fn new(
         filenum: Arc<Mutex<u64>>,
@@ -58,7 +59,8 @@ impl ElementSink {
 
     fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
         self.num_elements += 1;
-        if self.num_elements >= Self::MAX_ELEMENTS_COUNT {
+        let max_elements = if self.osm_type == OSMType::Node { Self::MAX_NODES_COUNT } else { Self::MAX_WAY_RELATION_COUNT };
+        if self.num_elements >= max_elements {
             self.finish_batch();
         }
         Ok(())
