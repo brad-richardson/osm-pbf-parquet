@@ -38,7 +38,7 @@ pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema 
     // TODO - add type field when not writing with partitions
     // `type` STRING
     // Field::new("type", DataType::Utf8, false)
-    
+
     Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new(
@@ -132,22 +132,30 @@ impl OSMArrowBuilder {
         OSMArrowBuilder { builders }
     }
 
-    pub fn append_row(
+    pub fn append_row<T, N, M>(
         &mut self,
         id: i64,
         _type_: OSMType,
-        tags: Vec<(String, String)>,
+        tags_iter: T,
         lat: Option<i128>,
         lon: Option<i128>,
-        nodes: Option<Vec<i64>>,
-        members: Option<Vec<(OSMType, i64, Option<String>)>>,
+        nodes_iter: N,
+        members_iter: M,
         changeset: Option<i64>,
         timestamp_ms: Option<i64>,
         uid: Option<i32>,
         user: Option<String>,
         version: Option<i32>,
         visible: Option<bool>,
-    ) {
+    ) -> usize
+    where
+        T: IntoIterator<Item = (String, String)>,
+        N: IntoIterator<Item = i64>,
+        M: IntoIterator<Item = (OSMType, i64, Option<String>)>,
+    {
+        // Track approximate size of inserted data, starting with known constant sizes
+        let mut est_size_bytes = 64usize;
+
         self.builders[0]
             .as_any_mut()
             .downcast_mut::<Int64Builder>()
@@ -158,7 +166,8 @@ impl OSMArrowBuilder {
             .as_any_mut()
             .downcast_mut::<MapBuilder<StringBuilder, StringBuilder>>()
             .unwrap();
-        for (key, value) in tags {
+        for (key, value) in tags_iter {
+            est_size_bytes += key.len() + value.len();
             tags_builder.keys().append_value(key);
             tags_builder.values().append_value(value);
         }
@@ -183,7 +192,8 @@ impl OSMArrowBuilder {
 
         let struct_builder = nodes_builder.values();
 
-        for node_id in nodes.unwrap_or_default() {
+        for node_id in nodes_iter {
+            est_size_bytes += 8usize;
             struct_builder
                 .field_builder::<Int64Builder>(0)
                 .unwrap()
@@ -201,7 +211,10 @@ impl OSMArrowBuilder {
 
         let members_struct_builder = members_builder.values();
 
-        for (osm_type, ref_, role) in members.unwrap_or_default() {
+        for (osm_type, ref_, role) in members_iter {
+            // Rough size to avoid unwrapping, role should be fairly short.
+            est_size_bytes += 10usize;
+
             let type_builder = members_struct_builder
                 .field_builder::<StringBuilder>(0)
                 .unwrap();
@@ -257,7 +270,6 @@ impl OSMArrowBuilder {
             .unwrap()
             .append_option(visible);
 
-
         // let feature_type = match type_ {
         //     OSMType::Node => "node",
         //     OSMType::Way => "way",
@@ -269,6 +281,7 @@ impl OSMArrowBuilder {
         //     .downcast_mut::<StringBuilder>()
         //     .unwrap()
         //     .append_value(feature_type);
+        return est_size_bytes;
     }
 
     pub fn finish(&mut self) -> Result<RecordBatch, ArrowError> {

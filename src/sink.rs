@@ -13,14 +13,16 @@ use crate::osm_arrow::OSMType;
 pub struct ElementSink {
     osm_builder: Box<OSMArrowBuilder>,
     num_elements: u64,
+    estimated_current_size_bytes: usize,
     filenum: Arc<Mutex<u64>>,
     output_dir: String,
     pub osm_type: OSMType,
 }
 
 impl ElementSink {
-    const MAX_NODES_COUNT: u64 = 5_000_000;
-    const MAX_WAY_RELATION_COUNT: u64 = 500_000;
+    const MAX_FEATURE_COUNT: u64 = 5_000_000;
+    // Balance between memory pressure and parquet block size
+    const TARGET_SIZE_BYTES: usize = 250_000_000usize;
 
     pub fn new(
         filenum: Arc<Mutex<u64>>,
@@ -30,6 +32,7 @@ impl ElementSink {
         Ok(ElementSink {
             osm_builder: Box::new(OSMArrowBuilder::new()),
             num_elements: 0,
+            estimated_current_size_bytes: 0usize,
             filenum,
             output_dir,
             osm_type,
@@ -55,12 +58,14 @@ impl ElementSink {
         writer.close().unwrap();
 
         self.num_elements = 0;
+        self.estimated_current_size_bytes = 0;
     }
 
     fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
         self.num_elements += 1;
-        let max_elements = if self.osm_type == OSMType::Node { Self::MAX_NODES_COUNT } else { Self::MAX_WAY_RELATION_COUNT };
-        if self.num_elements >= max_elements {
+        if self.num_elements >= Self::MAX_FEATURE_COUNT
+            || self.estimated_current_size_bytes >= Self::TARGET_SIZE_BYTES
+        {
             self.finish_batch();
         }
         Ok(())
@@ -89,14 +94,15 @@ impl ElementSink {
             .unwrap_or("")
             .to_string();
 
-        self.osm_builder.append_row(
+        let est_size_bytes = self.osm_builder.append_row(
             node.id(),
             OSMType::Node,
-            Self::process_tags(node.tags()),
+            node.tags()
+                .map(|(key, value)| (key.to_string(), value.to_string())),
             Some(node.nano_lat() as i128),
             Some(node.nano_lon() as i128),
-            None,
-            None,
+            std::iter::empty(),
+            std::iter::empty(),
             info.changeset(),
             info.milli_timestamp(),
             info.uid(),
@@ -104,6 +110,7 @@ impl ElementSink {
             info.version(),
             Some(info.visible()),
         );
+        self.estimated_current_size_bytes += est_size_bytes;
 
         self.increment_and_cycle()
     }
@@ -115,19 +122,15 @@ impl ElementSink {
             user = Some(info.user().unwrap_or("").to_string());
         }
 
-        let mut tags = Vec::new();
-        for (key, value) in node.tags() {
-            tags.push((key.to_string(), value.to_string()));
-        }
-
-        self.osm_builder.append_row(
+        let est_size_bytes = self.osm_builder.append_row(
             node.id(),
             OSMType::Node,
-            tags,
+            node.tags()
+                .map(|(key, value)| (key.to_string(), value.to_string())),
             Some(node.nano_lat() as i128),
             Some(node.nano_lon() as i128),
-            None,
-            None,
+            std::iter::empty(),
+            std::iter::empty(),
             info.map(|info| info.changeset()),
             info.map(|info| info.milli_timestamp()),
             info.map(|info| info.uid()),
@@ -135,6 +138,8 @@ impl ElementSink {
             info.map(|info| info.version()),
             info.map(|info| info.visible()),
         );
+        self.estimated_current_size_bytes += est_size_bytes;
+
         self.increment_and_cycle()
     }
 
@@ -146,19 +151,15 @@ impl ElementSink {
             .unwrap_or("")
             .to_string();
 
-        let mut nodes = Vec::new();
-        for way_ref in way.refs() {
-            nodes.push(way_ref);
-        }
-
-        self.osm_builder.append_row(
+        let est_size_bytes = self.osm_builder.append_row(
             way.id(),
             OSMType::Way,
-            Self::process_tags(way.tags()),
+            way.tags()
+                .map(|(key, value)| (key.to_string(), value.to_string())),
             None,
             None,
-            Some(nodes),
-            None,
+            way.refs().map(|id| id),
+            std::iter::empty(),
             info.changeset(),
             info.milli_timestamp(),
             info.uid(),
@@ -166,6 +167,7 @@ impl ElementSink {
             info.version(),
             Some(info.visible()),
         );
+        self.estimated_current_size_bytes += est_size_bytes;
 
         self.increment_and_cycle()
     }
@@ -178,8 +180,21 @@ impl ElementSink {
             .unwrap_or("")
             .to_string();
 
-        let mut members = Vec::new();
-        for member in relation.members() {
+        // let mut members = Vec::new();
+        // for member in relation.members() {
+        //     let type_ = match member.member_type {
+        //         RelMemberType::Node => OSMType::Node,
+        //         RelMemberType::Way => OSMType::Way,
+        //         RelMemberType::Relation => OSMType::Relation,
+        //     };
+
+        //     let role = match member.role() {
+        //         Ok(role) => Some(role.to_string()),
+        //         Err(_) => None,
+        //     };
+        //     members.push((type_, member.member_id, role));
+        // }
+        let members_iter = relation.members().map(|member| {
             let type_ = match member.member_type {
                 RelMemberType::Node => OSMType::Node,
                 RelMemberType::Way => OSMType::Way,
@@ -190,17 +205,19 @@ impl ElementSink {
                 Ok(role) => Some(role.to_string()),
                 Err(_) => None,
             };
-            members.push((type_, member.member_id, role));
-        }
+            return (type_, member.member_id, role);
+        });
 
-        self.osm_builder.append_row(
+        let est_size_bytes = self.osm_builder.append_row(
             relation.id(),
             OSMType::Relation,
-            Self::process_tags(relation.tags()),
+            relation
+                .tags()
+                .map(|(key, value)| (key.to_string(), value.to_string())),
             None,
             None,
-            None,
-            Some(members),
+            std::iter::empty(),
+            members_iter,
             info.changeset(),
             info.milli_timestamp(),
             info.uid(),
@@ -208,15 +225,8 @@ impl ElementSink {
             info.version(),
             Some(info.visible()),
         );
+        self.estimated_current_size_bytes += est_size_bytes;
 
         self.increment_and_cycle()
-    }
-
-    fn process_tags(tag_iter: TagIter<'_>) -> Vec<(String, String)> {
-        let mut tags = Vec::new();
-        for (key, value) in tag_iter {
-            tags.push((key.to_string(), value.to_string()));
-        }
-        tags
     }
 }
