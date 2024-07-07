@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::sync::{Arc, Mutex};
 
-use osmpbf::{DenseNode, Node, RelMemberType, Relation, TagIter, Way};
+use osmpbf::{DenseNode, Node, RelMemberType, Relation, Way};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 // use parquet::data_type::DataType;

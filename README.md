@@ -44,9 +44,24 @@ cargo run --release -- --input your.osm.pbf --output ./parquet
 5. Test with `cd test && ./prepare.sh && python3 validate.py`
 
 
+## Benchmarks
+osm-pbf-parquet prioritizes transcode speed over file size, file count or perserving ordering.
+| | Time (wall) | Output size | File count |
+| - | - | - | - |
+| osm-pbf-parquet | 33 minutes | 234GB | 3,253 |
+| [osm-parquetizer](https://github.com/adrianulbona/osm-parquetizer) | 196 minutes | 285GB | 3 |
+| [osm2orc](https://github.com/mojodna/osm2orc) | 385 minutes | 110GB | 1 |
+Test system:
+```
+i5-9400 (6 CPU, 32GB memory)
+Ubuntu 24.04
+OpenJDK 17
+Rust 1.79.0
+```
+
+
 ## License
 Distributed under the MIT License. See `LICENSE` for more information.
-
 
 ## Acknowledgments
 * [osmpbf](https://github.com/b-r-u/osmpbf) and [osm2gzip](https://github.com/b-r-u/osm2gzip) for reading PBF data
