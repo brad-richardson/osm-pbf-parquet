@@ -6,6 +6,22 @@ edition = "2021"
 [dependencies]
 arrow = "52.0.0"
 clap = { version = "4.5.8", features = ["derive"] }
-osmpbf = "0.2"
+flate2 = { version = "1.0.30", features = ["zlib-ng"], default-features = false }
+osmpbf = "0.2.8"
 parquet = "52.0.0"
 rayon = "1.5.0"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[lib]
+name = "osm_pbf_parquet"
+path = "src/lib.rs"
+
+[[bin]]
+name = "osm-pbf-parquet"
+path = "src/main.rs"
+
+[[bench]]
+name = "benchmark"
+harness = false
