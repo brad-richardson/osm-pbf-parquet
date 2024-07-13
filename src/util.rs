@@ -17,17 +17,17 @@ pub struct Args {
     #[arg(short, long, default_value = "./parquet")]
     pub output: String,
 
-    /// Override target row group est size, balance this with available memory
+    /// Override target record batch size, balance this with available memory
     /// default is total memory / CPU count / 4
     #[arg(long)]
-    pub row_group_target_bytes: Option<usize>,
+    pub record_batch_target_bytes: Option<usize>,
 
     /// Max feature count per row group
     #[arg(long)]
-    pub row_group_max_feature_count: Option<u64>,
+    pub max_row_group_size: Option<usize>,
 }
 
-pub fn default_row_group_size() -> usize {
+pub fn default_record_batch_size() -> usize {
     let system = System::new_all();
     // Estimate per thread available memory, leaving overhead for copies and system processes
     return (system.total_memory() as usize / system.cpus().len()) / 4usize;

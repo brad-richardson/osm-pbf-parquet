@@ -3,12 +3,12 @@ use std::sync::{Arc, Mutex};
 
 use osmpbf::{DenseNode, Node, RelMemberType, Relation, Way};
 use parquet::arrow::ArrowWriter;
-use parquet::basic::Compression;
+use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
 
 use crate::osm_arrow::OSMArrowBuilder;
 use crate::osm_arrow::OSMType;
-use crate::util::{default_row_group_size, ARGS};
+use crate::util::{default_record_batch_size, ARGS};
 
 pub struct ElementSink {
     osm_builder: Box<OSMArrowBuilder>,
@@ -17,8 +17,8 @@ pub struct ElementSink {
     filenum: Arc<Mutex<u64>>,
     output_dir: String,
     pub osm_type: OSMType,
-    target_size_bytes: usize,
-    max_feature_count: Option<u64>,
+    target_record_batch_size: usize,
+    max_row_group_size: Option<usize>,
 }
 
 impl ElementSink {
@@ -35,10 +35,10 @@ impl ElementSink {
             filenum,
             output_dir: args.output.clone(),
             osm_type,
-            target_size_bytes: args
-                .row_group_target_bytes
-                .unwrap_or(default_row_group_size()),
-            max_feature_count: args.row_group_max_feature_count,
+            target_record_batch_size: args
+                .record_batch_target_bytes
+                .unwrap_or(default_record_batch_size()),
+            max_row_group_size: args.max_row_group_size,
         })
     }
 
@@ -51,9 +51,12 @@ impl ElementSink {
 
         let batch = self.osm_builder.finish().unwrap();
 
-        let props = WriterProperties::builder()
-            .set_compression(Compression::SNAPPY)
-            .build();
+        let mut props_builder = WriterProperties::builder()
+            .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()));
+        if let Some(max_row_group_size) = self.max_row_group_size {
+            props_builder = props_builder.set_max_row_group_size(max_row_group_size);
+        }
+        let props = props_builder.build();
 
         let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
 
@@ -66,10 +69,7 @@ impl ElementSink {
 
     fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
         self.num_elements += 1;
-        if (self.max_feature_count.is_some()
-            && self.num_elements >= self.max_feature_count.unwrap())
-            || self.estimated_current_size_bytes >= self.target_size_bytes
-        {
+        if self.estimated_current_size_bytes >= self.target_record_batch_size {
             self.finish_batch();
         }
         Ok(())

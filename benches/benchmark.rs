@@ -9,8 +9,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             let args = Args {
                 input: "./test/el-salvador-latest.osm.pbf".to_string(),
                 output: "./test/bench-out/".to_string(), // Will just overwrite files on each run
-                row_group_max_feature_count: None,
-                row_group_target_bytes: None,
+                max_row_group_size: None,
+                record_batch_target_bytes: None,
             };
             let _ = driver(args);
         })
