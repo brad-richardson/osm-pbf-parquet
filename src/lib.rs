@@ -6,30 +6,19 @@ use osmpbf::{BlobDecode, BlobReader, Element};
 use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
 
-use clap::Parser;
-
-mod osm_arrow;
-mod sink;
-use crate::sink::ElementSink;
+pub mod osm_arrow;
+pub mod sink;
+pub mod util;
 use crate::osm_arrow::OSMType;
-
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-pub struct Args {
-    /// Path to input PBF
-    #[arg(short, long)]
-    pub input: String,
-
-    /// Path to output directory
-    #[arg(short, long, default_value = "./parquet")]
-    pub output: String,
-}
+use crate::sink::ElementSink;
+use crate::util::{Args, ARGS};
 
 pub fn driver(args: Args) -> Result<(), io::Error> {
     // TODO - validation of args
+    let _ = ARGS.set(args.clone());
+
     let reader = BlobReader::from_path(args.input)?;
-    let output_dir = args.output;
-    
+
     let sinkpools = HashMap::from([
         (OSMType::Node, Arc::new(Mutex::new(vec![]))),
         (OSMType::Way, Arc::new(Mutex::new(vec![]))),
@@ -49,7 +38,7 @@ pub fn driver(args: Args) -> Result<(), io::Error> {
                 return Ok(sink);
             }
         }
-        ElementSink::new(filenums[&osm_type].clone(), output_dir.clone(), osm_type)
+        ElementSink::new(filenums[&osm_type].clone(), osm_type)
     };
 
     let add_sink_to_pool = |sink: ElementSink| {

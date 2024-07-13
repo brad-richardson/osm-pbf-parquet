@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 use osmpbf::{DenseNode, Node, RelMemberType, Relation, Way};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
-// use parquet::data_type::DataType;
 use parquet::file::properties::WriterProperties;
 
 use crate::osm_arrow::OSMArrowBuilder;
 use crate::osm_arrow::OSMType;
+use crate::util::{default_row_group_size, ARGS};
 
 pub struct ElementSink {
     osm_builder: Box<OSMArrowBuilder>,
@@ -17,25 +17,28 @@ pub struct ElementSink {
     filenum: Arc<Mutex<u64>>,
     output_dir: String,
     pub osm_type: OSMType,
+    target_size_bytes: usize,
+    max_feature_count: Option<u64>,
 }
 
 impl ElementSink {
-    const MAX_FEATURE_COUNT: u64 = 5_000_000;
-    // Balance between memory pressure and parquet block size
-    const TARGET_SIZE_BYTES: usize = 250_000_000usize;
-
     pub fn new(
         filenum: Arc<Mutex<u64>>,
-        output_dir: String,
+        // output_dir: String,
         osm_type: OSMType,
     ) -> Result<Self, std::io::Error> {
+        let args = ARGS.get().unwrap();
         Ok(ElementSink {
             osm_builder: Box::new(OSMArrowBuilder::new()),
             num_elements: 0,
             estimated_current_size_bytes: 0usize,
             filenum,
-            output_dir,
+            output_dir: args.output.clone(),
             osm_type,
+            target_size_bytes: args
+                .row_group_target_bytes
+                .unwrap_or(default_row_group_size()),
+            max_feature_count: args.row_group_max_feature_count,
         })
     }
 
@@ -63,8 +66,9 @@ impl ElementSink {
 
     fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
         self.num_elements += 1;
-        if self.num_elements >= Self::MAX_FEATURE_COUNT
-            || self.estimated_current_size_bytes >= Self::TARGET_SIZE_BYTES
+        if (self.max_feature_count.is_some()
+            && self.num_elements >= self.max_feature_count.unwrap())
+            || self.estimated_current_size_bytes >= self.target_size_bytes
         {
             self.finish_batch();
         }
