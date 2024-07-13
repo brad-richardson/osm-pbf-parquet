@@ -30,3 +30,5 @@ jobs:
     - name: Run test
       working-directory: ./test
       run: python3 ./validate.py
+    - name: Benchmark
+      run: cargo bench

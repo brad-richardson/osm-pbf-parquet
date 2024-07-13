@@ -1,4 +1,4 @@
-## About
+## osm-pbf-parquet
 Transcode OSM PBF file to parquet files with hive-style partitioning by type:
 ```
 planet.osm.pbf
