@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
 use arrow::array::builder::{
-    ArrayBuilder, BooleanBuilder, Decimal128Builder, Int64Builder, ListBuilder, MapBuilder,
-    StringBuilder, StructBuilder,
+    ArrayBuilder, BooleanBuilder, Int64Builder, ListBuilder, MapBuilder, StringBuilder,
+    StructBuilder,
 };
 use arrow::array::{make_builder, ArrayRef, Float64Builder, Int32Builder};
 use arrow::datatypes::DataType;
 use arrow::datatypes::Field;
 use arrow::datatypes::Fields;
 use arrow::datatypes::Schema;
-use arrow::datatypes::DECIMAL128_MAX_PRECISION;
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 
@@ -46,16 +45,8 @@ pub fn osm_arrow_schema() -> Schema {
             DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Utf8)),
             true,
         ),
-        Field::new(
-            "lat",
-            DataType::DOUBLE,
-            true,
-        ),
-        Field::new(
-            "lon",
-            DataType::DOUBLE,
-            true,
-        ),
+        Field::new("lat", DataType::Float64, true),
+        Field::new("lon", DataType::Float64, true),
         Field::new(
             "nds",
             DataType::List(Arc::new(Field::new(
@@ -89,14 +80,15 @@ pub fn osm_arrow_schema() -> Schema {
 
 pub struct OSMArrowBuilder {
     builders: Vec<Box<dyn ArrayBuilder>>,
+    schema: Schema,
 }
 
 impl OSMArrowBuilder {
     pub fn new() -> Self {
-        let arrow_schema = osm_arrow_schema();
+        let schema = osm_arrow_schema();
 
         let mut builders: Vec<Box<dyn ArrayBuilder>> = Vec::new();
-        for field in arrow_schema.fields() {
+        for field in schema.fields() {
             // Custom builders for `tags`, `nodes`, and `members` as `make_builder` creates a more complex builder structure or doesn't support the type
             if field.name() == "tags" {
                 builders.push(Box::new(MapBuilder::new(
@@ -123,7 +115,7 @@ impl OSMArrowBuilder {
             }
         }
 
-        OSMArrowBuilder { builders }
+        OSMArrowBuilder { builders, schema }
     }
 
     pub fn append_row<T, N, M>(
@@ -285,9 +277,8 @@ impl OSMArrowBuilder {
             .map(|builder| builder.finish())
             .collect();
 
-        let schema = osm_arrow_schema(Self::DEFAULT_DECIMAL_SCALE, Self::DEFAULT_DECIMAL_SCALE);
-
-        let field_arrays_iter = schema
+        let field_arrays_iter = self
+            .schema
             .fields()
             .iter()
             .zip(array_refs.iter())
