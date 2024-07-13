@@ -4,7 +4,7 @@ use arrow::array::builder::{
     ArrayBuilder, BooleanBuilder, Decimal128Builder, Int64Builder, ListBuilder, MapBuilder,
     StringBuilder, StructBuilder,
 };
-use arrow::array::{make_builder, ArrayRef, Int32Builder};
+use arrow::array::{make_builder, ArrayRef, Float64Builder, Int32Builder};
 use arrow::datatypes::DataType;
 use arrow::datatypes::Field;
 use arrow::datatypes::Fields;
@@ -20,12 +20,12 @@ pub enum OSMType {
     Relation,
 }
 
-pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema {
+pub fn osm_arrow_schema() -> Schema {
     // Derived from this schema:
     // `id` BIGINT,
     // `tags` MAP <STRING, STRING>,
-    // `lat` DECIMAL(9, 7),
-    // `lon` DECIMAL(10, 7),
+    // `lat` DOUBLE,
+    // `lon` DOUBLE,
     // `nds` ARRAY<STRUCT<ref: BIGINT>>,
     // `members` ARRAY<STRUCT<type: STRING, ref: BIGINT, role: STRING>>,
     // `changeset` BIGINT,
@@ -48,12 +48,12 @@ pub fn osm_arrow_schema(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Schema 
         ),
         Field::new(
             "lat",
-            DataType::Decimal128(DECIMAL128_MAX_PRECISION, lat_decimal_scale),
+            DataType::DOUBLE,
             true,
         ),
         Field::new(
             "lon",
-            DataType::Decimal128(DECIMAL128_MAX_PRECISION, lon_decimal_scale),
+            DataType::DOUBLE,
             true,
         ),
         Field::new(
@@ -92,14 +92,8 @@ pub struct OSMArrowBuilder {
 }
 
 impl OSMArrowBuilder {
-    const DEFAULT_DECIMAL_SCALE: i8 = 9;
-
     pub fn new() -> Self {
-        Self::new_params(Self::DEFAULT_DECIMAL_SCALE, Self::DEFAULT_DECIMAL_SCALE)
-    }
-
-    pub fn new_params(lat_decimal_scale: i8, lon_decimal_scale: i8) -> Self {
-        let arrow_schema = osm_arrow_schema(lat_decimal_scale, lon_decimal_scale);
+        let arrow_schema = osm_arrow_schema();
 
         let mut builders: Vec<Box<dyn ArrayBuilder>> = Vec::new();
         for field in arrow_schema.fields() {
@@ -137,8 +131,8 @@ impl OSMArrowBuilder {
         id: i64,
         _type_: OSMType,
         tags_iter: T,
-        lat: Option<i128>,
-        lon: Option<i128>,
+        lat: Option<f64>,
+        lon: Option<f64>,
         nodes_iter: N,
         members_iter: M,
         changeset: Option<i64>,
@@ -175,12 +169,12 @@ impl OSMArrowBuilder {
 
         self.builders[2]
             .as_any_mut()
-            .downcast_mut::<Decimal128Builder>()
+            .downcast_mut::<Float64Builder>()
             .unwrap()
             .append_option(lat);
         self.builders[3]
             .as_any_mut()
-            .downcast_mut::<Decimal128Builder>()
+            .downcast_mut::<Float64Builder>()
             .unwrap()
             .append_option(lon);
 

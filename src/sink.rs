@@ -103,8 +103,8 @@ impl ElementSink {
             OSMType::Node,
             node.tags()
                 .map(|(key, value)| (key.to_string(), value.to_string())),
-            Some(node.nano_lat() as i128),
-            Some(node.nano_lon() as i128),
+            Some(node.lat()),
+            Some(node.lon()),
             std::iter::empty(),
             std::iter::empty(),
             info.changeset(),
@@ -131,8 +131,8 @@ impl ElementSink {
             OSMType::Node,
             node.tags()
                 .map(|(key, value)| (key.to_string(), value.to_string())),
-            Some(node.nano_lat() as i128),
-            Some(node.nano_lon() as i128),
+            Some(node.lat()),
+            Some(node.lon()),
             std::iter::empty(),
             std::iter::empty(),
             info.map(|info| info.changeset()),
