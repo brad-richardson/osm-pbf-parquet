@@ -48,7 +48,6 @@ impl ElementSink {
     }
 
     pub fn finish_batch(&mut self) {
-
         let mut props_builder = WriterProperties::builder();
         let args = ARGS.get().unwrap();
         if args.compression == 0 {
@@ -100,8 +99,9 @@ impl ElementSink {
             let store_path = Path::from_absolute_path(&absolute_path).unwrap();
             let object_store = LocalFileSystem::new();
 
-            block_on(object_store.put(&store_path, payload)).unwrap_or_else(|_| panic!("Failed to write to path {0}",
-                &absolute_path.display()));
+            block_on(object_store.put(&store_path, payload)).unwrap_or_else(|_| {
+                panic!("Failed to write to path {0}", &absolute_path.display())
+            });
         }
 
         self.num_elements = 0;
@@ -121,10 +121,7 @@ impl ElementSink {
         let compression_stem = if is_zstd_compression { ".zstd" } else { "" };
         let path = format!(
             "/type={}/{}_{:04}{}.parquet",
-            self.osm_type,
-            self.osm_type,
-            num,
-            compression_stem
+            self.osm_type, self.osm_type, num, compression_stem
         );
         *num += 1;
         path
