@@ -90,6 +90,12 @@ pub struct OSMArrowBuilder {
     schema: Schema,
 }
 
+impl Default for OSMArrowBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OSMArrowBuilder {
     pub fn new() -> Self {
         let schema = osm_arrow_schema();
@@ -125,6 +131,7 @@ impl OSMArrowBuilder {
         OSMArrowBuilder { builders, schema }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn append_row<T, N, M>(
         &mut self,
         id: i64,
@@ -265,7 +272,7 @@ impl OSMArrowBuilder {
         //     .downcast_mut::<StringBuilder>()
         //     .unwrap()
         //     .append_value(type_.to_string());
-        return est_size_bytes;
+        est_size_bytes
     }
 
     pub fn finish(&mut self) -> Result<RecordBatch, ArrowError> {

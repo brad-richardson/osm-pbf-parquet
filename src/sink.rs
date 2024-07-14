@@ -48,14 +48,6 @@ impl ElementSink {
     }
 
     pub fn finish_batch(&mut self) {
-        let trailing_path = self.new_trailing_path(&self.filenum);
-        // Remove trailing `/`s to avoid empty path segment
-        let full_path = format!(
-            "{0}{trailing_path}",
-            &self.output_path.trim_end_matches('/')
-        );
-
-        let batch = self.osm_builder.finish().unwrap();
 
         let mut props_builder = WriterProperties::builder();
         let args = ARGS.get().unwrap();
@@ -71,6 +63,15 @@ impl ElementSink {
         }
         let props = props_builder.build();
 
+        let trailing_path = self.new_trailing_path(&self.filenum, args.compression != 0);
+        // Remove trailing `/`s to avoid empty path segment
+        let full_path = format!(
+            "{0}{trailing_path}",
+            &self.output_path.trim_end_matches('/')
+        );
+
+        let batch = self.osm_builder.finish().unwrap();
+
         let mut buffer = Vec::new();
         let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
         writer.write(&batch).expect("Writing batch");
@@ -85,7 +86,7 @@ impl ElementSink {
                 .build()
                 .unwrap();
 
-            let path = Path::parse(&url.path()).unwrap();
+            let path = Path::parse(url.path()).unwrap();
 
             // S3 object store put needs to in a tokio runtime context
             tokio::runtime::Builder::new_current_thread()
@@ -93,16 +94,14 @@ impl ElementSink {
                 .build()
                 .unwrap()
                 .block_on(async { object_store.put(&path, payload).await })
-                .expect(&format!("Failed to write to path {0}", &path));
+                .unwrap_or_else(|_| panic!("Failed to write to path {0}", &path));
         } else {
             let absolute_path = absolute(&full_path).unwrap();
             let store_path = Path::from_absolute_path(&absolute_path).unwrap();
             let object_store = LocalFileSystem::new();
 
-            block_on(object_store.put(&store_path, payload)).expect(&format!(
-                "Failed to write to path {0}",
-                &absolute_path.display()
-            ));
+            block_on(object_store.put(&store_path, payload)).unwrap_or_else(|_| panic!("Failed to write to path {0}",
+                &absolute_path.display()));
         }
 
         self.num_elements = 0;
@@ -117,13 +116,15 @@ impl ElementSink {
         Ok(())
     }
 
-    fn new_trailing_path(&self, filenum: &Arc<Mutex<u64>>) -> String {
+    fn new_trailing_path(&self, filenum: &Arc<Mutex<u64>>, is_zstd_compression: bool) -> String {
         let mut num = filenum.lock().unwrap();
+        let compression_stem = if is_zstd_compression { ".zstd" } else { "" };
         let path = format!(
-            "/type={}/{}_{:04}.zstd.parquet",
-            self.osm_type.to_string(),
-            self.osm_type.to_string(),
-            num
+            "/type={}/{}_{:04}{}.parquet",
+            self.osm_type,
+            self.osm_type,
+            num,
+            compression_stem
         );
         *num += 1;
         path
@@ -201,7 +202,7 @@ impl ElementSink {
                 .map(|(key, value)| (key.to_string(), value.to_string())),
             None,
             None,
-            way.refs().map(|id| id),
+            way.refs(),
             std::iter::empty(),
             info.changeset(),
             info.milli_timestamp(),
@@ -234,7 +235,7 @@ impl ElementSink {
                 Ok(role) => Some(role.to_string()),
                 Err(_) => None,
             };
-            return (type_, member.member_id, role);
+            (type_, member.member_id, role)
         });
 
         let est_size_bytes = self.osm_builder.append_row(

@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Make sure CI fails on all warnings, including Clippy lints
+  RUSTFLAGS: "-Dwarnings"
 
 jobs:
   build:
@@ -32,3 +34,5 @@ jobs:
       run: python3 ./validate.py
     - name: Benchmark
       run: cargo bench
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features

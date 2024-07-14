@@ -4,13 +4,13 @@ Transcode OSM PBF file to parquet files with hive-style partitioning by type:
 planet.osm.pbf
 parquet/
   type=node/
-    node_00000.parquet
+    node_0000.zstd.parquet
     ...
   type=relation/
-    relation_00000.parquet
+    relation_0000.zstd.parquet
     ...
   type=way/
-    way_00000.parquet
+    way_0000.zstd.parquet
     ...
 ```
 [Reference Arrow/SQL schema](https://github.com/brad-richardson/osm-pbf-parquet/blob/main/src/osm_arrow.rs)
@@ -48,7 +48,8 @@ cargo run --release -- --input your.osm.pbf --output ./parquet
 osm-pbf-parquet prioritizes transcode speed over file size, file count or perserving ordering. Here is a comparison against similar tools on the 2024-06-24 OSM planet PBF:
 | | Time (wall) | Output size | File count |
 | - | - | - | - |
-| osm-pbf-parquet | 33 minutes | 234GB | 3,253 |
+| **osm-pbf-parquet** (zstd:3) | 36 minutes | 182GB | 600 |
+| **osm-pbf-parquet** (zstd:9) | 72 minutes | 165GB | 600 |
 | [osm-parquetizer](https://github.com/adrianulbona/osm-parquetizer) | 196 minutes | 285GB | 3 |
 | [osm2orc](https://github.com/mojodna/osm2orc) | 385 minutes | 110GB | 1 |
 

@@ -14,6 +14,7 @@ pub struct Args {
     pub input: String,
 
     /// Path to output directory
+    /// S3 URIs and filesystem paths are supported
     #[arg(short, long, default_value = "./parquet")]
     pub output: String,
 
