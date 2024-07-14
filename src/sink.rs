@@ -1,5 +1,4 @@
 use futures::executor::block_on;
-use std::future::IntoFuture;
 use std::path::absolute;
 use std::sync::{Arc, Mutex};
 
@@ -7,7 +6,7 @@ use bytes::Bytes;
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::path::Path;
-use object_store::{parse_url, ObjectStore, PutPayload};
+use object_store::{ObjectStore, PutPayload};
 use osmpbf::{DenseNode, Node, RelMemberType, Relation, Way};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, ZstdLevel};
@@ -69,7 +68,6 @@ impl ElementSink {
 
         let mut buffer = Vec::new();
         let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
-
         writer.write(&batch).expect("Writing batch");
         writer.close().unwrap();
 
@@ -82,28 +80,25 @@ impl ElementSink {
                 .build()
                 .unwrap();
 
-            let parsed_trailing_path = Path::parse(&trailing_path).unwrap();
-            println!("{}", &parsed_trailing_path);
+            let path = Path::parse(&url.path()).unwrap();
 
-            // S3 object store needs to a tokio runtime context
+            // S3 object store put needs to in a tokio runtime context
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-                    // TODO - this isn't working
-                    object_store.put(&parsed_trailing_path, payload).await
+                    object_store.put(&path, payload).await
                 })
-                .expect(&format!("Failed to write to path {0}", &full_path));
+                .expect(&format!("Failed to write to path {0}", &path));
         } else {
-            let path = std::path::Path::new(&full_path);
-            let resolved_path = absolute(path).unwrap();
-            let store_path = Path::from_absolute_path(&resolved_path).unwrap();
+            let absolute_path = absolute(&full_path).unwrap();
+            let store_path = Path::from_absolute_path(&absolute_path).unwrap();
             let object_store = LocalFileSystem::new();
 
             block_on(object_store.put(&store_path, payload)).expect(&format!(
                 "Failed to write to path {0}",
-                &resolved_path.display()
+                &absolute_path.display()
             ));
         }
 
