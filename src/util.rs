@@ -25,6 +25,11 @@ pub struct Args {
     /// Max feature count per row group
     #[arg(long)]
     pub max_row_group_size: Option<usize>,
+
+    /// Element types to include in output
+    /// use 'n' for nodes, 'w' for ways, 'r' for relations, 'nwr' for all
+    #[arg(short, long, default_value = "nwr")]
+    pub types: String,
 }
 
 pub fn default_record_batch_size() -> usize {
