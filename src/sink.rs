@@ -117,7 +117,7 @@ impl ElementSink {
     fn new_trailing_path(&self, filenum: &Arc<Mutex<u64>>) -> String {
         let mut num = filenum.lock().unwrap();
         let path = format!(
-            "/type={}/{}_{:04}.parquet",
+            "/type={}/{}_{:04}.zstd.parquet",
             self.osm_type.to_string(),
             self.osm_type.to_string(),
             num
