@@ -6,12 +6,11 @@ use std::fs;
 pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("benchmark", |b| {
         b.iter(|| {
-            let args = Args {
-                input: "./test/el-salvador-latest.osm.pbf".to_string(),
-                output: "./test/bench-out/".to_string(), // Will just overwrite files on each run
-                max_row_group_size: None,
-                record_batch_target_bytes: None,
-            };
+            let args = Args::new(
+                "./test/el-salvador-latest.osm.pbf".to_string(),
+                "./test/bench-out/".to_string(), // Will just overwrite files on each run
+                0,
+            );
             let _ = driver(args);
         })
     });

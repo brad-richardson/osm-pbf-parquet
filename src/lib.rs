@@ -15,7 +15,6 @@ use crate::util::{Args, ARGS};
 
 pub fn driver(args: Args) -> Result<(), io::Error> {
     // TODO - validation of args
-
     // Store value for reading across threads (write-once)
     let _ = ARGS.set(args.clone());
 
@@ -49,10 +48,6 @@ pub fn driver(args: Args) -> Result<(), io::Error> {
         pool.push(sink);
     };
 
-    let allow_nodes = args.types.contains('n');
-    let allow_ways = args.types.contains('w');
-    let allow_relations = args.types.contains('r');
-
     reader
         .par_bridge()
         .try_for_each(|blob| -> Result<(), io::Error> {
@@ -63,27 +58,15 @@ pub fn driver(args: Args) -> Result<(), io::Error> {
                 for elem in block.elements() {
                     match elem {
                         Element::Node(ref node) => {
-                            if !allow_nodes {
-                                continue;
-                            }
                             node_sink.add_node(node)?;
                         }
                         Element::DenseNode(ref node) => {
-                            if !allow_nodes {
-                                continue;
-                            }
                             node_sink.add_dense_node(node)?;
                         }
                         Element::Way(ref way) => {
-                            if !allow_ways {
-                                continue;
-                            }
                             way_sink.add_way(way)?;
                         }
                         Element::Relation(ref rel) => {
-                            if !allow_relations {
-                                continue;
-                            }
                             rel_sink.add_relation(rel)?;
                         }
                     }
@@ -99,12 +82,6 @@ pub fn driver(args: Args) -> Result<(), io::Error> {
         for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {
-                if (sink.osm_type == OSMType::Node && !allow_nodes) ||
-                    (sink.osm_type == OSMType::Way && !allow_ways) ||
-                    (sink.osm_type == OSMType::Relation && !allow_relations) {
-                    // Skip to avoid writing empty files
-                    continue;
-                }
                 sink.finish_batch();
             }
         }

@@ -25,7 +25,6 @@ pub struct ElementSink {
     output_path: String,
     pub osm_type: OSMType,
     target_record_batch_size: usize,
-    max_row_group_size: Option<usize>,
 }
 
 impl ElementSink {
@@ -45,13 +44,12 @@ impl ElementSink {
             target_record_batch_size: args
                 .record_batch_target_bytes
                 .unwrap_or(default_record_batch_size()),
-            max_row_group_size: args.max_row_group_size,
         })
     }
 
     pub fn finish_batch(&mut self) {
         let trailing_path = self.new_trailing_path(&self.filenum);
-        // Remove trailing `/`s to avoid empty segment
+        // Remove trailing `/`s to avoid empty path segment
         let full_path = format!(
             "{0}{trailing_path}",
             &self.output_path.trim_end_matches('/')
@@ -59,9 +57,16 @@ impl ElementSink {
 
         let batch = self.osm_builder.finish().unwrap();
 
-        let mut props_builder = WriterProperties::builder()
-            .set_compression(Compression::ZSTD(ZstdLevel::try_new(3).unwrap()));
-        if let Some(max_row_group_size) = self.max_row_group_size {
+        let mut props_builder = WriterProperties::builder();
+        let args = ARGS.get().unwrap();
+        if args.compression == 0 {
+            props_builder = props_builder.set_compression(Compression::UNCOMPRESSED);
+        } else {
+            props_builder = props_builder.set_compression(Compression::ZSTD(
+                ZstdLevel::try_new(args.compression as i32).unwrap(),
+            ));
+        }
+        if let Some(max_row_group_size) = args.max_row_group_size {
             props_builder = props_builder.set_max_row_group_size(max_row_group_size);
         }
         let props = props_builder.build();
@@ -87,9 +92,7 @@ impl ElementSink {
                 .enable_all()
                 .build()
                 .unwrap()
-                .block_on(async {
-                    object_store.put(&path, payload).await
-                })
+                .block_on(async { object_store.put(&path, payload).await })
                 .expect(&format!("Failed to write to path {0}", &path));
         } else {
             let absolute_path = absolute(&full_path).unwrap();

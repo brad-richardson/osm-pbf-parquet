@@ -17,6 +17,10 @@ pub struct Args {
     #[arg(short, long, default_value = "./parquet")]
     pub output: String,
 
+    /// Zstd compression level, 1-22, 0 for no compression
+    #[arg(long, default_value = "3")]
+    pub compression: u8,
+
     /// Override target record batch size, balance this with available memory
     /// default is total memory / CPU count / 4
     #[arg(long)]
@@ -25,11 +29,18 @@ pub struct Args {
     /// Max feature count per row group
     #[arg(long)]
     pub max_row_group_size: Option<usize>,
+}
 
-    /// Element types to include in output
-    /// use 'n' for nodes, 'w' for ways, 'r' for relations, 'nwr' for all
-    #[arg(short, long, default_value = "nwr")]
-    pub types: String,
+impl Args {
+    pub fn new(input: String, output: String, compression: u8) -> Self {
+        Args {
+            input,
+            output,
+            compression,
+            record_batch_target_bytes: None,
+            max_row_group_size: None,
+        }
+    }
 }
 
 pub fn default_record_batch_size() -> usize {
