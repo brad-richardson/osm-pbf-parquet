@@ -1,10 +1,18 @@
-use std::fs::File;
+use futures::executor::block_on;
+use std::future::IntoFuture;
+use std::path::absolute;
 use std::sync::{Arc, Mutex};
 
+use bytes::Bytes;
+use object_store::aws::AmazonS3Builder;
+use object_store::local::LocalFileSystem;
+use object_store::path::Path;
+use object_store::{parse_url, ObjectStore, PutPayload};
 use osmpbf::{DenseNode, Node, RelMemberType, Relation, Way};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
+use url::Url;
 
 use crate::osm_arrow::OSMArrowBuilder;
 use crate::osm_arrow::OSMType;
@@ -15,7 +23,7 @@ pub struct ElementSink {
     num_elements: u64,
     estimated_current_size_bytes: usize,
     filenum: Arc<Mutex<u64>>,
-    output_dir: String,
+    output_path: String,
     pub osm_type: OSMType,
     target_record_batch_size: usize,
     max_row_group_size: Option<usize>,
@@ -33,7 +41,7 @@ impl ElementSink {
             num_elements: 0,
             estimated_current_size_bytes: 0usize,
             filenum,
-            output_dir: args.output.clone(),
+            output_path: args.output.clone(),
             osm_type,
             target_record_batch_size: args
                 .record_batch_target_bytes
@@ -43,11 +51,12 @@ impl ElementSink {
     }
 
     pub fn finish_batch(&mut self) {
-        let path_str = self.new_file_path(&self.filenum);
-        let path = std::path::Path::new(&path_str);
-        let prefix = path.parent().unwrap();
-        std::fs::create_dir_all(prefix).unwrap();
-        let file = File::create(path).unwrap();
+        let trailing_path = self.new_trailing_path(&self.filenum);
+        // Remove trailing `/`s to avoid empty segment
+        let full_path = format!(
+            "{0}{trailing_path}",
+            &self.output_path.trim_end_matches('/')
+        );
 
         let batch = self.osm_builder.finish().unwrap();
 
@@ -58,10 +67,45 @@ impl ElementSink {
         }
         let props = props_builder.build();
 
-        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props)).unwrap();
+        let mut buffer = Vec::new();
+        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
 
         writer.write(&batch).expect("Writing batch");
         writer.close().unwrap();
+
+        let payload = PutPayload::from_bytes(Bytes::from(buffer));
+
+        // TODO - create this when sink is created for reuse
+        if let Ok(url) = Url::parse(&full_path) {
+            let object_store = AmazonS3Builder::from_env()
+                .with_url(&full_path)
+                .build()
+                .unwrap();
+
+            let parsed_trailing_path = Path::parse(&trailing_path).unwrap();
+            println!("{}", &parsed_trailing_path);
+
+            // S3 object store needs to a tokio runtime context
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    // TODO - this isn't working
+                    object_store.put(&parsed_trailing_path, payload).await
+                })
+                .expect(&format!("Failed to write to path {0}", &full_path));
+        } else {
+            let path = std::path::Path::new(&full_path);
+            let resolved_path = absolute(path).unwrap();
+            let store_path = Path::from_absolute_path(&resolved_path).unwrap();
+            let object_store = LocalFileSystem::new();
+
+            block_on(object_store.put(&store_path, payload)).expect(&format!(
+                "Failed to write to path {0}",
+                &resolved_path.display()
+            ));
+        }
 
         self.num_elements = 0;
         self.estimated_current_size_bytes = 0;
@@ -75,16 +119,13 @@ impl ElementSink {
         Ok(())
     }
 
-    fn new_file_path(&self, filenum: &Arc<Mutex<u64>>) -> String {
+    fn new_trailing_path(&self, filenum: &Arc<Mutex<u64>>) -> String {
         let mut num = filenum.lock().unwrap();
-        let osm_type_str = match self.osm_type {
-            OSMType::Node => "node",
-            OSMType::Way => "way",
-            OSMType::Relation => "relation",
-        };
         let path = format!(
-            "{}/type={}/{}_{:05}.parquet",
-            self.output_dir, osm_type_str, osm_type_str, num
+            "/type={}/{}_{:04}.parquet",
+            self.osm_type.to_string(),
+            self.osm_type.to_string(),
+            num
         );
         *num += 1;
         path
@@ -184,20 +225,6 @@ impl ElementSink {
             .unwrap_or("")
             .to_string();
 
-        // let mut members = Vec::new();
-        // for member in relation.members() {
-        //     let type_ = match member.member_type {
-        //         RelMemberType::Node => OSMType::Node,
-        //         RelMemberType::Way => OSMType::Way,
-        //         RelMemberType::Relation => OSMType::Relation,
-        //     };
-
-        //     let role = match member.role() {
-        //         Ok(role) => Some(role.to_string()),
-        //         Err(_) => None,
-        //     };
-        //     members.push((type_, member.member_id, role));
-        // }
         let members_iter = relation.members().map(|member| {
             let type_ = match member.member_type {
                 RelMemberType::Node => OSMType::Node,

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 
 use arrow::array::builder::{
@@ -17,6 +18,12 @@ pub enum OSMType {
     Node,
     Way,
     Relation,
+}
+
+impl fmt::Display for OSMType {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "{}", format!("{:?}", self).to_lowercase())
+    }
 }
 
 pub fn osm_arrow_schema() -> Schema {
@@ -201,14 +208,10 @@ impl OSMArrowBuilder {
             // Rough size to avoid unwrapping, role should be fairly short.
             est_size_bytes += 10usize;
 
-            let type_builder = members_struct_builder
+            members_struct_builder
                 .field_builder::<StringBuilder>(0)
-                .unwrap();
-            match osm_type {
-                OSMType::Node => type_builder.append_value("node"),
-                OSMType::Way => type_builder.append_value("way"),
-                OSMType::Relation => type_builder.append_value("relation"),
-            }
+                .unwrap()
+                .append_value(osm_type.to_string());
 
             members_struct_builder
                 .field_builder::<Int64Builder>(1)
@@ -256,17 +259,12 @@ impl OSMArrowBuilder {
             .unwrap()
             .append_option(visible);
 
-        // let feature_type = match type_ {
-        //     OSMType::Node => "node",
-        //     OSMType::Way => "way",
-        //     OSMType::Relation => "relation",
-        // };
         // // TODO - write this if not writing with partitions
         // self.builders[12]
         //     .as_any_mut()
         //     .downcast_mut::<StringBuilder>()
         //     .unwrap()
-        //     .append_value(feature_type);
+        //     .append_value(type_.to_string());
         return est_size_bytes;
     }
 
