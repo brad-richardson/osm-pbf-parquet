@@ -29,7 +29,7 @@ impl fmt::Display for OSMType {
 pub fn osm_arrow_schema() -> Schema {
     // Derived from this schema:
     // `id` BIGINT,
-    // `tags` MAP <STRING, STRING>,
+    // `tags` MAP<STRING, STRING>,
     // `lat` DOUBLE,
     // `lon` DOUBLE,
     // `nds` ARRAY<STRUCT<ref: BIGINT>>,
@@ -49,14 +49,17 @@ pub fn osm_arrow_schema() -> Schema {
         Field::new("id", DataType::Int64, false),
         Field::new(
             "tags",
-            DataType::Map(Arc::new(Field::new("entries", 
-                DataType::Struct(Fields::from(vec![
-                    Field::new("keys", DataType::Utf8, false),
-                    Field::new("values", DataType::Utf8, true)
-                ])),
-                false
-            )), false),
-            // DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Utf8)),
+            DataType::Map(
+                Arc::new(Field::new(
+                    "entries",
+                    DataType::Struct(Fields::from(vec![
+                        Field::new("keys", DataType::Utf8, false),
+                        Field::new("values", DataType::Utf8, true),
+                    ])),
+                    false,
+                )),
+                false,
+            ),
             true,
         ),
         Field::new("lat", DataType::Float64, true),
@@ -94,7 +97,7 @@ pub fn osm_arrow_schema() -> Schema {
 
 pub struct OSMArrowBuilder {
     builders: Vec<Box<dyn ArrayBuilder>>,
-    schema: Arc<Schema>,
+    schema: Schema,
 }
 
 impl Default for OSMArrowBuilder {
@@ -135,7 +138,7 @@ impl OSMArrowBuilder {
             }
         }
 
-        OSMArrowBuilder { builders, schema: Arc::new(schema) }
+        OSMArrowBuilder { builders, schema }
     }
 
     #[allow(clippy::too_many_arguments)]
