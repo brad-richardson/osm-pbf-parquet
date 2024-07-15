@@ -5,7 +5,7 @@ use arrow::array::builder::{
     ArrayBuilder, BooleanBuilder, Int64Builder, ListBuilder, MapBuilder, StringBuilder,
     StructBuilder,
 };
-use arrow::array::{make_builder, ArrayRef, Float64Builder, Int32Builder};
+use arrow::array::{make_builder, Float64Builder, Int32Builder};
 use arrow::datatypes::DataType;
 use arrow::datatypes::Field;
 use arrow::datatypes::Fields;
@@ -49,7 +49,14 @@ pub fn osm_arrow_schema() -> Schema {
         Field::new("id", DataType::Int64, false),
         Field::new(
             "tags",
-            DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Utf8)),
+            DataType::Map(Arc::new(Field::new("entries", 
+                DataType::Struct(Fields::from(vec![
+                    Field::new("keys", DataType::Utf8, false),
+                    Field::new("values", DataType::Utf8, true)
+                ])),
+                false
+            )), false),
+            // DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Utf8)),
             true,
         ),
         Field::new("lat", DataType::Float64, true),
@@ -87,7 +94,7 @@ pub fn osm_arrow_schema() -> Schema {
 
 pub struct OSMArrowBuilder {
     builders: Vec<Box<dyn ArrayBuilder>>,
-    schema: Schema,
+    schema: Arc<Schema>,
 }
 
 impl Default for OSMArrowBuilder {
@@ -128,7 +135,7 @@ impl OSMArrowBuilder {
             }
         }
 
-        OSMArrowBuilder { builders, schema }
+        OSMArrowBuilder { builders, schema: Arc::new(schema) }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -276,18 +283,12 @@ impl OSMArrowBuilder {
     }
 
     pub fn finish(&mut self) -> Result<RecordBatch, ArrowError> {
-        let array_refs: Vec<ArrayRef> = self
-            .builders
-            .iter_mut()
-            .map(|builder| builder.finish())
-            .collect();
-
         let field_arrays_iter = self
             .schema
             .fields()
             .iter()
-            .zip(array_refs.iter())
-            .map(|(field, array)| (field.name(), array.clone()));
+            .zip(self.builders.iter_mut())
+            .map(|(field, builder)| (field.name(), builder.finish()));
 
         RecordBatch::try_from_iter(field_arrays_iter)
     }
