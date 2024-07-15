@@ -97,7 +97,7 @@ pub fn osm_arrow_schema() -> Schema {
 
 pub struct OSMArrowBuilder {
     builders: Vec<Box<dyn ArrayBuilder>>,
-    schema: Schema,
+    schema: Arc<Schema>,
 }
 
 impl Default for OSMArrowBuilder {
@@ -138,7 +138,10 @@ impl OSMArrowBuilder {
             }
         }
 
-        OSMArrowBuilder { builders, schema }
+        OSMArrowBuilder {
+            builders,
+            schema: Arc::new(schema),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -286,13 +289,12 @@ impl OSMArrowBuilder {
     }
 
     pub fn finish(&mut self) -> Result<RecordBatch, ArrowError> {
-        let field_arrays_iter = self
-            .schema
-            .fields()
-            .iter()
-            .zip(self.builders.iter_mut())
-            .map(|(field, builder)| (field.name(), builder.finish()));
+        let array_refs = self
+            .builders
+            .iter_mut()
+            .map(|builder| builder.finish())
+            .collect();
 
-        RecordBatch::try_from_iter(field_arrays_iter)
+        RecordBatch::try_new(self.schema.clone(), array_refs)
     }
 }
