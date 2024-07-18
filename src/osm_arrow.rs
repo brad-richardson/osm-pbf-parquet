@@ -1,17 +1,13 @@
-use std::alloc::LayoutErr;
 use std::fmt;
 use std::sync::Arc;
 
 use arrow::array::builder::{
-    ArrayBuilder, BooleanBuilder, Int64Builder, ListBuilder, MapBuilder, StringBuilder,
-    StructBuilder,
+    BooleanBuilder, Int64Builder, ListBuilder, MapBuilder, StringBuilder, StructBuilder,
 };
-use arrow::array::{make_builder, Array, ArrayRef, Float64Builder, Int32Builder, TimestampMillisecondBuilder};
-use arrow::datatypes::{DataType, TimeUnit, Field, Fields, Schema};
+use arrow::array::{ArrayRef, Float64Builder, Int32Builder, TimestampMillisecondBuilder};
+use arrow::datatypes::{DataType, Field, Fields, Schema, TimeUnit};
 use arrow::error::ArrowError;
-use arrow::ipc::Utf8Builder;
 use arrow::record_batch::RecordBatch;
-use osmpbf::WayNodeLocationsIter;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum OSMType {
@@ -87,7 +83,11 @@ pub fn osm_arrow_schema() -> Schema {
             true,
         ),
         Field::new("changeset", DataType::Int64, true),
-        Field::new("timestamp", DataType::Timestamp(TimeUnit::Millisecond, None), true),
+        Field::new(
+            "timestamp",
+            DataType::Timestamp(TimeUnit::Millisecond, None),
+            true,
+        ),
         Field::new("uid", DataType::Int32, true),
         Field::new("user", DataType::Utf8, true),
         Field::new("version", DataType::Int32, true),
