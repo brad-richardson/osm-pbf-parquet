@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use sysinfo::System;
+// use sysinfo::System;
 
 use clap::Parser;
 
@@ -45,7 +45,12 @@ impl Args {
 }
 
 pub fn default_record_batch_size() -> usize {
-    let system = System::new_all();
-    // Estimate per thread available memory, leaving overhead for copies and system processes
-    return (system.total_memory() as usize / system.cpus().len()) / 4usize;
+    // let system = System::new_all();
+    // // Estimate per thread available memory, leaving overhead for copies and system processes
+    // return (system.total_memory() as usize / system.cpus().len()) / 16usize;
+    100_000_000usize
+}
+
+pub fn default_target_file_size() -> usize {
+    1_000_000_000usize
 }

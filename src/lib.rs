@@ -82,7 +82,7 @@ pub fn driver(args: Args) -> Result<(), io::Error> {
         for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {
-                sink.finish_batch();
+                sink.finish();
             }
         }
     }
