@@ -11,16 +11,16 @@ use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
 use url::Url;
 
+use crate::osm_arrow::osm_arrow_schema;
 use crate::osm_arrow::OSMArrowBuilder;
 use crate::osm_arrow::OSMType;
-use crate::osm_arrow::osm_arrow_schema;
 use crate::util::{default_record_batch_size_mb, ARGS};
 
 pub struct ElementSink {
     // Config for writing file
     pub osm_type: OSMType,
     filenum: Arc<Mutex<u64>>,
-    
+
     // Arrow wrappers
     osm_builder: Box<OSMArrowBuilder>,
     writer: Option<AsyncArrowWriter<BufWriter>>,
@@ -33,10 +33,7 @@ pub struct ElementSink {
 }
 
 impl ElementSink {
-    pub fn new(
-        filenum: Arc<Mutex<u64>>,
-        osm_type: OSMType,
-    ) -> Result<Self, std::io::Error> {
+    pub fn new(filenum: Arc<Mutex<u64>>, osm_type: OSMType) -> Result<Self, std::io::Error> {
         let args = ARGS.get().unwrap();
 
         let full_path = Self::create_full_path(&args.output, &osm_type, &filenum, args.compression);
@@ -45,7 +42,8 @@ impl ElementSink {
 
         let target_record_batch_bytes = args
             .record_batch_target_mb
-            .unwrap_or(default_record_batch_size_mb()) * 1_000_000usize;
+            .unwrap_or(default_record_batch_size_mb())
+            * 1_000_000usize;
 
         Ok(ElementSink {
             osm_type,
@@ -64,9 +62,9 @@ impl ElementSink {
     pub fn finish(&mut self) {
         let rt = self.finish_batch();
         // Underlying object store writer needs to run in a tokio runtime context
-        let _ = rt.block_on(async {
+        rt.block_on(async {
             let _ = self.writer.take().unwrap().close().await;
-        } );
+        });
     }
 
     fn finish_batch(&mut self) -> tokio::runtime::Runtime {
@@ -83,24 +81,31 @@ impl ElementSink {
         let _ = rt.block_on(async {
             let batch = self.osm_builder.finish().unwrap();
             self.writer.as_mut().unwrap().write(&batch).await
-        } );
+        });
 
         // Reset writer to new path if needed
         self.estimated_file_bytes += self.estimated_record_batch_bytes;
         if self.estimated_file_bytes >= self.target_file_bytes {
             // Underlying object store writer needs to in a tokio runtime context
-            let _ = rt.block_on(async {
-                self.writer.take().unwrap().close().await
-            } );
+            let _ = rt.block_on(async { self.writer.take().unwrap().close().await });
 
             // Create new writer and output
             let args = ARGS.get().unwrap();
-            let full_path = Self::create_full_path(&args.output, &self.osm_type, &self.filenum, args.compression);
+            let full_path = Self::create_full_path(
+                &args.output,
+                &self.osm_type,
+                &self.filenum,
+                args.compression,
+            );
             let buf_writer = Self::create_buf_writer(&full_path);
-            self.writer = Some(Self::create_writer(buf_writer, args.compression, args.max_row_group_count));
+            self.writer = Some(Self::create_writer(
+                buf_writer,
+                args.compression,
+                args.max_row_group_count,
+            ));
             self.estimated_file_bytes = 0;
         }
-        
+
         self.estimated_record_batch_bytes = 0;
         rt
     }
@@ -126,14 +131,18 @@ impl ElementSink {
         } else {
             let object_store = LocalFileSystem::new();
             let absolute_path = absolute(full_path).unwrap();
-            let store_path = Path::from_absolute_path(&absolute_path).unwrap();
+            let store_path = Path::from_absolute_path(absolute_path).unwrap();
 
             buf_writer = BufWriter::new(Arc::new(object_store), store_path);
         }
         buf_writer
     }
 
-    fn create_writer(buffer: BufWriter, compression: u8, max_row_group_rows: Option<usize>) -> AsyncArrowWriter<BufWriter> {
+    fn create_writer(
+        buffer: BufWriter,
+        compression: u8,
+        max_row_group_rows: Option<usize>,
+    ) -> AsyncArrowWriter<BufWriter> {
         let mut props_builder = WriterProperties::builder();
         if compression == 0 {
             props_builder = props_builder.set_compression(Compression::UNCOMPRESSED);
@@ -150,16 +159,22 @@ impl ElementSink {
         AsyncArrowWriter::try_new(buffer, Arc::new(osm_arrow_schema()), Some(props)).unwrap()
     }
 
-    fn create_full_path(output_path: &str, osm_type: &OSMType, filenum: &Arc<Mutex<u64>>, compression: u8) -> String {
+    fn create_full_path(
+        output_path: &str,
+        osm_type: &OSMType,
+        filenum: &Arc<Mutex<u64>>,
+        compression: u8,
+    ) -> String {
         let trailing_path = Self::new_trailing_path(osm_type, filenum, compression != 0);
         // Remove trailing `/`s to avoid empty path segment
-        format!(
-            "{0}{trailing_path}",
-            &output_path.trim_end_matches('/')
-        )
+        format!("{0}{trailing_path}", &output_path.trim_end_matches('/'))
     }
 
-    fn new_trailing_path(osm_type: &OSMType, filenum: &Arc<Mutex<u64>>, is_zstd_compression: bool) -> String {
+    fn new_trailing_path(
+        osm_type: &OSMType,
+        filenum: &Arc<Mutex<u64>>,
+        is_zstd_compression: bool,
+    ) -> String {
         let mut num = filenum.lock().unwrap();
         let compression_stem = if is_zstd_compression { ".zstd" } else { "" };
         let path = format!(
