@@ -14,7 +14,7 @@ use url::Url;
 use crate::osm_arrow::OSMArrowBuilder;
 use crate::osm_arrow::OSMType;
 use crate::osm_arrow::osm_arrow_schema;
-use crate::util::{default_record_batch_size, ARGS};
+use crate::util::{default_record_batch_size_mb, ARGS};
 
 pub struct ElementSink {
     // Config for writing file
@@ -26,9 +26,10 @@ pub struct ElementSink {
     writer: Option<AsyncArrowWriter<BufWriter>>,
 
     // State tracking for batching
-    num_elements: u64,
     estimated_record_batch_bytes: usize,
-    target_record_batch_size: usize,
+    estimated_file_bytes: usize,
+    target_record_batch_bytes: usize,
+    target_file_bytes: usize,
 }
 
 impl ElementSink {
@@ -38,12 +39,13 @@ impl ElementSink {
     ) -> Result<Self, std::io::Error> {
         let args = ARGS.get().unwrap();
 
-        let target_record_batch_size = args
-            .record_batch_target_bytes
-            .unwrap_or(default_record_batch_size());
         let full_path = Self::create_full_path(&args.output, &osm_type, &filenum, args.compression);
         let buf_writer = Self::create_buf_writer(&full_path);
-        let writer = Self::create_writer(buf_writer, args.compression, target_record_batch_size);
+        let writer = Self::create_writer(buf_writer, args.compression, args.max_row_group_count);
+
+        let target_record_batch_bytes = args
+            .record_batch_target_mb
+            .unwrap_or(default_record_batch_size_mb()) * 1_000_000usize;
 
         Ok(ElementSink {
             osm_type,
@@ -52,74 +54,59 @@ impl ElementSink {
             osm_builder: Box::new(OSMArrowBuilder::new()),
             writer: Some(writer),
 
-            num_elements: 0,
             estimated_record_batch_bytes: 0usize,
-            target_record_batch_size,
+            estimated_file_bytes: 0usize,
+            target_record_batch_bytes,
+            target_file_bytes: args.file_target_mb * 1_000_000usize,
         })
     }
 
-    pub fn finish(mut self) {
-        self.finish_batch();
-        // Underlying object store writer needs to in a tokio runtime context
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                self.writer.unwrap().close().await
-            } )
-            .unwrap_or_else(|_| panic!("Failed to close file"));
+    pub fn finish(&mut self) {
+        let rt = self.finish_batch();
+        // Underlying object store writer needs to run in a tokio runtime context
+        let _ = rt.block_on(async {
+            let _ = self.writer.take().unwrap().close().await;
+        } );
     }
 
-    fn finish_batch(&mut self) {
-        if self.num_elements == 0 {
-            // Nothing to write
-            return
-        }
-        let batch = self.osm_builder.finish().unwrap();
-
-        // Underlying object store writer needs to in a tokio runtime context
-        tokio::runtime::Builder::new_current_thread()
+    fn finish_batch(&mut self) -> tokio::runtime::Runtime {
+        let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .unwrap()
-            .block_on(async {
-                self.writer.as_mut().unwrap().write(&batch).await
-            } )
-            .unwrap_or_else(|_| panic!("Failed to write batch"));
+            .unwrap();
 
-        // TODO - make this size configurable
-        if self.writer.as_ref().unwrap().bytes_written() > 1_000_000usize {
-            
+        if self.estimated_record_batch_bytes == 0 {
+            // Nothing to write
+            return rt;
+        }
+        // Underlying object store writer needs to run in a tokio runtime context
+        let _ = rt.block_on(async {
+            let batch = self.osm_builder.finish().unwrap();
+            self.writer.as_mut().unwrap().write(&batch).await
+        } );
+
+        // Reset writer to new path if needed
+        self.estimated_file_bytes += self.estimated_record_batch_bytes;
+        if self.estimated_file_bytes >= self.target_file_bytes {
             // Underlying object store writer needs to in a tokio runtime context
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async {
-                    self.writer.take().unwrap().close().await
-                } )
-                .unwrap_or_else(|_| panic!("Failed to close file"));
+            let _ = rt.block_on(async {
+                self.writer.take().unwrap().close().await
+            } );
 
-            // New writer, output
+            // Create new writer and output
             let args = ARGS.get().unwrap();
-
-            let target_record_batch_size = args
-                .record_batch_target_bytes
-                .unwrap_or(default_record_batch_size());
             let full_path = Self::create_full_path(&args.output, &self.osm_type, &self.filenum, args.compression);
             let buf_writer = Self::create_buf_writer(&full_path);
-            self.writer = Some(Self::create_writer(buf_writer, args.compression, target_record_batch_size));
+            self.writer = Some(Self::create_writer(buf_writer, args.compression, args.max_row_group_count));
+            self.estimated_file_bytes = 0;
         }
         
-        self.num_elements = 0;
         self.estimated_record_batch_bytes = 0;
+        rt
     }
 
     fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
-        self.num_elements += 1;
-        // TODO - probably just let this be handled by the underlying writer
-        if self.estimated_record_batch_bytes >= self.target_record_batch_size {
+        if self.estimated_record_batch_bytes >= self.target_record_batch_bytes {
             self.finish_batch();
         }
         Ok(())
@@ -146,14 +133,17 @@ impl ElementSink {
         buf_writer
     }
 
-    fn create_writer(buffer: BufWriter, compression: u8, max_row_group_size: usize) -> AsyncArrowWriter<BufWriter> {
-        let mut props_builder = WriterProperties::builder().set_max_row_group_size(max_row_group_size);
+    fn create_writer(buffer: BufWriter, compression: u8, max_row_group_rows: Option<usize>) -> AsyncArrowWriter<BufWriter> {
+        let mut props_builder = WriterProperties::builder();
         if compression == 0 {
             props_builder = props_builder.set_compression(Compression::UNCOMPRESSED);
         } else {
             props_builder = props_builder.set_compression(Compression::ZSTD(
                 ZstdLevel::try_new(compression as i32).unwrap(),
             ));
+        }
+        if let Some(max_rows) = max_row_group_rows {
+            props_builder = props_builder.set_max_row_group_size(max_rows);
         }
         let props = props_builder.build();
 
