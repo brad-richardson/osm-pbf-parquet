@@ -60,13 +60,20 @@ impl ElementSink {
             target_file_bytes: args.file_target_mb * 1_000_000usize,
 
             // Underlying object store writer (cloud/s3) needs to run in a tokio runtime context
-            tokio_runtime: Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()),
+            tokio_runtime: Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
         })
     }
 
     pub fn finish(&mut self) {
         self.finish_batch();
-        let _ = self.tokio_runtime.block_on(self.writer.take().unwrap().close());
+        let _ = self
+            .tokio_runtime
+            .block_on(self.writer.take().unwrap().close());
     }
 
     fn finish_batch(&mut self) {
@@ -75,14 +82,16 @@ impl ElementSink {
             return;
         }
         let batch = self.osm_builder.finish().unwrap();
-        let _ = self.tokio_runtime.block_on(
-            self.writer.as_mut().unwrap().write(&batch)
-        );
+        let _ = self
+            .tokio_runtime
+            .block_on(self.writer.as_mut().unwrap().write(&batch));
 
         // Reset writer to new path if needed
         self.estimated_file_bytes += self.estimated_record_batch_bytes;
         if self.estimated_file_bytes >= self.target_file_bytes {
-            let _ = self.tokio_runtime.block_on(self.writer.take().unwrap().close());
+            let _ = self
+                .tokio_runtime
+                .block_on(self.writer.take().unwrap().close());
 
             // Create new writer and output
             let args = ARGS.get().unwrap();
