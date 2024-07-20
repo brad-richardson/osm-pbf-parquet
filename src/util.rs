@@ -32,7 +32,7 @@ pub struct Args {
     pub max_row_group_count: Option<usize>,
 
     /// Override target parquet file size
-    #[arg(long, default_value_t = 1_000usize)]
+    #[arg(long, default_value_t = 500usize)]
     pub file_target_mb: usize,
 }
 
@@ -44,7 +44,7 @@ impl Args {
             compression,
             record_batch_target_mb: None,
             max_row_group_count: None,
-            file_target_mb: 1_000usize,
+            file_target_mb: 500usize,
         }
     }
 }

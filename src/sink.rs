@@ -9,6 +9,7 @@ use osmpbf::{DenseNode, Node, RelMemberType, Relation, Way};
 use parquet::arrow::async_writer::AsyncArrowWriter;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
+use tokio::runtime::Runtime;
 use url::Url;
 
 use crate::osm_arrow::osm_arrow_schema;
@@ -30,6 +31,7 @@ pub struct ElementSink {
     estimated_file_bytes: usize,
     target_record_batch_bytes: usize,
     target_file_bytes: usize,
+    tokio_runtime: Arc<Runtime>,
 }
 
 impl ElementSink {
@@ -56,38 +58,31 @@ impl ElementSink {
             estimated_file_bytes: 0usize,
             target_record_batch_bytes,
             target_file_bytes: args.file_target_mb * 1_000_000usize,
+
+            // Underlying object store writer (cloud/s3) needs to run in a tokio runtime context
+            tokio_runtime: Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()),
         })
     }
 
     pub fn finish(&mut self) {
-        let rt = self.finish_batch();
-        // Underlying object store writer needs to run in a tokio runtime context
-        rt.block_on(async {
-            let _ = self.writer.take().unwrap().close().await;
-        });
+        self.finish_batch();
+        let _ = self.tokio_runtime.block_on(self.writer.take().unwrap().close());
     }
 
-    fn finish_batch(&mut self) -> tokio::runtime::Runtime {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
+    fn finish_batch(&mut self) {
         if self.estimated_record_batch_bytes == 0 {
             // Nothing to write
-            return rt;
+            return;
         }
-        // Underlying object store writer needs to run in a tokio runtime context
-        let _ = rt.block_on(async {
-            let batch = self.osm_builder.finish().unwrap();
-            self.writer.as_mut().unwrap().write(&batch).await
-        });
+        let batch = self.osm_builder.finish().unwrap();
+        let _ = self.tokio_runtime.block_on(
+            self.writer.as_mut().unwrap().write(&batch)
+        );
 
         // Reset writer to new path if needed
         self.estimated_file_bytes += self.estimated_record_batch_bytes;
         if self.estimated_file_bytes >= self.target_file_bytes {
-            // Underlying object store writer needs to in a tokio runtime context
-            let _ = rt.block_on(async { self.writer.take().unwrap().close().await });
+            let _ = self.tokio_runtime.block_on(self.writer.take().unwrap().close());
 
             // Create new writer and output
             let args = ARGS.get().unwrap();
@@ -107,7 +102,6 @@ impl ElementSink {
         }
 
         self.estimated_record_batch_bytes = 0;
-        rt
     }
 
     fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
@@ -119,7 +113,6 @@ impl ElementSink {
 
     fn create_buf_writer(full_path: &str) -> BufWriter {
         // TODO - better validation of URL/paths here and error handling
-        let buf_writer: BufWriter;
         if let Ok(url) = Url::parse(full_path) {
             let s3_store = AmazonS3Builder::from_env()
                 .with_url(url.clone())
@@ -127,15 +120,14 @@ impl ElementSink {
                 .unwrap();
             let path = Path::parse(url.path()).unwrap();
 
-            buf_writer = BufWriter::new(Arc::new(s3_store), path);
+            BufWriter::new(Arc::new(s3_store), path)
         } else {
             let object_store = LocalFileSystem::new();
             let absolute_path = absolute(full_path).unwrap();
             let store_path = Path::from_absolute_path(absolute_path).unwrap();
 
-            buf_writer = BufWriter::new(Arc::new(object_store), store_path);
+            BufWriter::new(Arc::new(object_store), store_path)
         }
-        buf_writer
     }
 
     fn create_writer(
