@@ -19,17 +19,21 @@ pub struct Args {
     pub output: String,
 
     /// Zstd compression level, 1-22, 0 for no compression
-    #[arg(long, default_value = "3")]
+    #[arg(long, default_value_t = 3)]
     pub compression: u8,
 
     /// Override target record batch size, balance this with available memory
-    /// default is total memory / CPU count / 4
+    /// default is total memory (MB) / CPU count / 8
     #[arg(long)]
-    pub record_batch_target_bytes: Option<usize>,
+    pub record_batch_target_mb: Option<usize>,
 
     /// Max feature count per row group
     #[arg(long)]
-    pub max_row_group_size: Option<usize>,
+    pub max_row_group_count: Option<usize>,
+
+    /// Override target parquet file size
+    #[arg(long, default_value_t = 500usize)]
+    pub file_target_mb: usize,
 }
 
 impl Args {
@@ -38,14 +42,15 @@ impl Args {
             input,
             output,
             compression,
-            record_batch_target_bytes: None,
-            max_row_group_size: None,
+            record_batch_target_mb: None,
+            max_row_group_count: None,
+            file_target_mb: 500usize,
         }
     }
 }
 
-pub fn default_record_batch_size() -> usize {
+pub fn default_record_batch_size_mb() -> usize {
     let system = System::new_all();
     // Estimate per thread available memory, leaving overhead for copies and system processes
-    return (system.total_memory() as usize / system.cpus().len()) / 4usize;
+    return ((system.total_memory() as usize / 1_000_000usize) / system.cpus().len()) / 8usize;
 }

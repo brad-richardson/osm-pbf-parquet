@@ -7,8 +7,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("benchmark", |b| {
         b.iter(|| {
             let args = Args::new(
-                "./test/el-salvador-latest.osm.pbf".to_string(),
-                "./test/bench-out/".to_string(), // Will just overwrite files on each run
+                "./test/test.osm.pbf".to_string(),
+                "./test/bench-out/".to_string(),
                 0,
             );
             let _ = driver(args);

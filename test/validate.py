@@ -4,8 +4,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-OSM_XML_FILE = "cook-islands-latest.osm"
-OSM_GEOJSON_FILE = "cook-islands-latest.geojsonseq"
+OSM_XML_FILE = "test.osm"
 PARQUET_DIR = "./parquet"
 
 # Parse, process OSM XML file into a dataframe

@@ -26,15 +26,16 @@ jobs:
     - name: Install python test dependencies
       working-directory: ./test
       run: pip3 install -r requirements.txt
-    - name: Prepare test files
-      run: ./prepare.sh
+    - name: Prepare and run test
+      if: success() || failure()
+      run: ./test.sh
       working-directory: ./test
-    - name: Run test
-      working-directory: ./test
-      run: python3 ./validate.py
     - name: Benchmark
+      if: success() || failure()
       run: cargo bench
     - name: Run clippy
+      if: success() || failure()
       run: cargo clippy --all-targets --all-features
     - name: Run cargo fmt
+      if: success() || failure()
       run: cargo fmt --all -- --check

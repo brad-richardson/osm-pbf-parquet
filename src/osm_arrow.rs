@@ -96,8 +96,6 @@ pub fn osm_arrow_schema() -> Schema {
 }
 
 pub struct OSMArrowBuilder {
-    schema: Arc<Schema>,
-
     id_builder: Box<Int64Builder>,
     tags_builder: Box<MapBuilder<StringBuilder, StringBuilder>>,
     lat_builder: Box<Float64Builder>,
@@ -148,7 +146,6 @@ impl OSMArrowBuilder {
         let visible_builder = Box::new(BooleanBuilder::new());
 
         OSMArrowBuilder {
-            schema: Arc::new(osm_arrow_schema()),
             id_builder,
             tags_builder,
             lat_builder,
@@ -263,6 +260,6 @@ impl OSMArrowBuilder {
             Arc::new(self.visible_builder.finish()),
         ];
 
-        RecordBatch::try_new(self.schema.clone(), array_refs)
+        RecordBatch::try_new(Arc::new(osm_arrow_schema()), array_refs)
     }
 }
