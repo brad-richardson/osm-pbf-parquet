@@ -31,7 +31,7 @@ pub struct ElementSink {
     estimated_file_bytes: usize,
     target_record_batch_bytes: usize,
     target_file_bytes: usize,
-    tokio_runtime: Arc<Runtime>,
+    // tokio_runtime: Arc<Runtime>,
 }
 
 impl ElementSink {
@@ -60,38 +60,41 @@ impl ElementSink {
             target_file_bytes: args.file_target_mb * 1_000_000usize,
 
             // Underlying object store writer (cloud/s3) needs to run in a tokio runtime context
-            tokio_runtime: Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            ),
+            // tokio_runtime: Arc::new(
+            //     tokio::runtime::Builder::new_multi_thread()
+            //         .enable_all()
+            //         .build()
+            //         .unwrap(),
+            // ),
         })
     }
 
-    pub fn finish(&mut self) {
-        self.finish_batch();
-        let _ = self
-            .tokio_runtime
-            .block_on(self.writer.take().unwrap().close());
+    pub async fn finish(&mut self) {
+        self.finish_batch().await;
+        // let _ = self
+        //     .tokio_runtime
+        //     .block_on(self.writer.take().unwrap().close());
+        self.writer.take().unwrap().close().await;
     }
 
-    fn finish_batch(&mut self) {
+    async fn finish_batch(&mut self) {
         if self.estimated_record_batch_bytes == 0 {
             // Nothing to write
             return;
         }
         let batch = self.osm_builder.finish().unwrap();
-        let _ = self
-            .tokio_runtime
-            .block_on(self.writer.as_mut().unwrap().write(&batch));
+        // let _ = self
+        //     .tokio_runtime
+        //     .block_on(self.writer.as_mut().unwrap().write(&batch));
+        self.writer.as_mut().unwrap().write(&batch).await;
 
         // Reset writer to new path if needed
         self.estimated_file_bytes += self.estimated_record_batch_bytes;
         if self.estimated_file_bytes >= self.target_file_bytes {
-            let _ = self
-                .tokio_runtime
-                .block_on(self.writer.take().unwrap().close());
+            // let _ = self
+            //     .tokio_runtime
+            //     .block_on(self.writer.take().unwrap().close());
+            self.writer.take().unwrap().close().await;
 
             // Create new writer and output
             let args = ARGS.get().unwrap();
@@ -113,9 +116,9 @@ impl ElementSink {
         self.estimated_record_batch_bytes = 0;
     }
 
-    fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
+    async fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
         if self.estimated_record_batch_bytes >= self.target_record_batch_bytes {
-            self.finish_batch();
+            self.finish_batch().await;
         }
         Ok(())
     }
@@ -186,7 +189,7 @@ impl ElementSink {
         path
     }
 
-    pub fn add_node(&mut self, node: &Node) -> Result<(), std::io::Error> {
+    pub async fn add_node(&mut self, node: &Node<'_>) -> Result<(), std::io::Error> {
         let info = node.info();
         let user = info
             .user()
@@ -212,10 +215,10 @@ impl ElementSink {
         );
         self.estimated_record_batch_bytes += est_size_bytes;
 
-        self.increment_and_cycle()
+        self.increment_and_cycle().await
     }
 
-    pub fn add_dense_node(&mut self, node: &DenseNode) -> Result<(), std::io::Error> {
+    pub async fn add_dense_node(&mut self, node: &DenseNode<'_>) -> Result<(), std::io::Error> {
         let info = node.info();
         let mut user: Option<String> = None;
         if let Some(info) = info {
@@ -240,10 +243,10 @@ impl ElementSink {
         );
         self.estimated_record_batch_bytes += est_size_bytes;
 
-        self.increment_and_cycle()
+        self.increment_and_cycle().await
     }
 
-    pub fn add_way(&mut self, way: &Way) -> Result<(), std::io::Error> {
+    pub async fn add_way(&mut self, way: &Way<'_>) -> Result<(), std::io::Error> {
         let info = way.info();
         let user = info
             .user()
@@ -269,10 +272,10 @@ impl ElementSink {
         );
         self.estimated_record_batch_bytes += est_size_bytes;
 
-        self.increment_and_cycle()
+        self.increment_and_cycle().await
     }
 
-    pub fn add_relation(&mut self, relation: &Relation) -> Result<(), std::io::Error> {
+    pub async fn add_relation(&mut self, relation: &Relation<'_>) -> Result<(), std::io::Error> {
         let info = relation.info();
         let user = info
             .user()
@@ -313,6 +316,6 @@ impl ElementSink {
         );
         self.estimated_record_batch_bytes += est_size_bytes;
 
-        self.increment_and_cycle()
+        self.increment_and_cycle().await
     }
 }
