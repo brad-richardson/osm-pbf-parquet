@@ -10,6 +10,7 @@ use futures::StreamExt;
 // use futures_core::stream::Stream;
 // use futures_util::stream::StreamExt;
 
+use osmpbf::PrimitiveBlock;
 use osmpbf::{Blob, BlobDecode, BlobReader, Element};
 // use rayon::iter::ParallelBridge;
 // use rayon::iter::ParallelIterator;
@@ -25,7 +26,7 @@ use crate::osm_arrow::OSMType;
 use crate::sink::ElementSink;
 use crate::util::{Args, ARGS, cpu_count};
 
-pub async fn create_s3_sync_reader() -> Result<SyncIoBridge<impl AsyncBufRead>, anyhow::Error> {
+pub async fn create_s3_async_reader() -> Result<impl AsyncBufRead, anyhow::Error> {
     // let args = ARGS.get().unwrap();
 // pub async fn create_sync_reader<T>(args: Args) -> Result<BufReader<T>, std::io::Error> {
     // Bucket: omf-transp-public-devo-us-west-2
@@ -42,10 +43,7 @@ pub async fn create_s3_sync_reader() -> Result<SyncIoBridge<impl AsyncBufRead>, 
         .await?;
 
     // Convert the stream into a sync reader
-    let async_read = stream.body.into_async_read();
-    // Need to jump off the main tokio runtime 
-    let sync_reader = SyncIoBridge::new(async_read);
-    Ok(sync_reader)
+    Ok(stream.body.into_async_read())
 }
 
 // pub fn async_driver(args: Args) -> Result<(), io::Error> {
@@ -141,67 +139,132 @@ fn add_sink_to_pool(sink: ElementSink, sinkpools: Arc<HashMap<OSMType, Arc<Mutex
     pool.push(sink);
 }
 
-async fn process_blob(blob: Blob, sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>, filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>) {
+fn process_block(block: PrimitiveBlock, sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>, filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>) {
     // TODO - no unwraps
-    if let BlobDecode::OsmData(block) = blob.decode().unwrap() {
-        let mut node_sink = get_sink_from_pool(OSMType::Node, sinkpools.clone(), filenums.clone()).unwrap();
-        let mut way_sink = get_sink_from_pool(OSMType::Way, sinkpools.clone(), filenums.clone()).unwrap();
-        let mut rel_sink = get_sink_from_pool(OSMType::Relation, sinkpools.clone(), filenums.clone()).unwrap();
-        for elem in block.elements() {
-            match elem {
-                Element::Node(ref node) => {
-                    node_sink.add_node(node).await;
-                }
-                Element::DenseNode(ref node) => {
-                    node_sink.add_dense_node(node).await;
-                }
-                Element::Way(ref way) => {
-                    way_sink.add_way(way).await;
-                }
-                Element::Relation(ref rel) => {
-                    rel_sink.add_relation(rel).await;
-                }
+    let mut node_sink = get_sink_from_pool(OSMType::Node, sinkpools.clone(), filenums.clone()).unwrap();
+    let mut way_sink = get_sink_from_pool(OSMType::Way, sinkpools.clone(), filenums.clone()).unwrap();
+    let mut rel_sink = get_sink_from_pool(OSMType::Relation, sinkpools.clone(), filenums.clone()).unwrap();
+    for elem in block.elements() {
+        match elem {
+            Element::Node(ref node) => {
+                node_sink.add_node(node);
+            }
+            Element::DenseNode(ref node) => {
+                node_sink.add_dense_node(node);
+            }
+            Element::Way(ref way) => {
+                way_sink.add_way(way);
+            }
+            Element::Relation(ref rel) => {
+                rel_sink.add_relation(rel);
             }
         }
-        add_sink_to_pool(node_sink, sinkpools.clone());
-        add_sink_to_pool(way_sink, sinkpools.clone());
-        add_sink_to_pool(rel_sink, sinkpools.clone());
     }
+
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    // TODO - probably move this back into the element adds while it is piped
+    rt.block_on(node_sink.increment_and_cycle());
+    rt.block_on(way_sink.increment_and_cycle());
+    rt.block_on(rel_sink.increment_and_cycle());
+    
+    add_sink_to_pool(node_sink, sinkpools.clone());
+    add_sink_to_pool(way_sink, sinkpools.clone());
+    add_sink_to_pool(rel_sink, sinkpools.clone());
 }
 
-async fn s3_read(sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>, filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>) -> Result<(), osmpbf::Error> {
+fn s3_read(sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>, filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>) -> Result<(), osmpbf::Error> {
     // let rt = tokio::runtime::Builder::new_multi_thread()
     // .enable_all()
     // .build()
     // .unwrap();
     // TODO - unwraps
     // tokio::task::spawn_blocking(move || {
-    let sync_reader = tokio::task::block_in_place(|| create_s3_sync_reader()).await.unwrap();
-    let blob_reader = BlobReader::new(sync_reader);
-    let stream = stream::iter(blob_reader);
-    stream.for_each_concurrent(cpu_count() / 2, |blob| async {
-        process_blob(blob.unwrap(), sinkpools.clone(), filenums.clone()).await
-    }).await;
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let async_reader = rt.block_on(create_s3_async_reader()).unwrap();
+    // Need tokio runtime, but don't need to run on it otherwise
+    let sync_reader = SyncIoBridge::new_with_handle(async_reader, rt.handle().clone());
+    // rt.
+    let blob_reader = BlobReader::new(std::io::BufReader::new(sync_reader)); // TODO - std::io::BufReader here?
+    // let stream = stream::iter(blob_reader);
+    // stream.for
+    // TODO - maybe block on each blob read?
+
+
+
+    // TODO - cleanup
+    // TODO - stream element reads
+    // TODO - pipe out to other threads
+
+
+    let futures = blob_reader.filter_map(|blob| {
+        match blob.unwrap().decode() {
+            Ok(BlobDecode::OsmData(block)) => {
+                let sinkpools = sinkpools.clone();
+                let filenums = filenums.clone();
+                Some(
+                    process_block(block, sinkpools, filenums)
+                //     rt.spawn(async move {
+                //     // process_block(block, sinkpools, filenums).await
+                // })
+                )
+                // Some(1)
+            },
+            _ => {
+                // Ignore other blocks
+                None
+            }
+        }
+        // let decoded = blob.unwrap().decode().unwrap();
+        // match blob.ok()?.decode() {
+        //     Ok(BlobDecode::OsmData(block)) => {
+        //         // None
+        //         println!("post decode");
+        //         let sinkpools = sinkpools.clone();
+        //         let filenums = filenums.clone();
+        //         Some(
+        //             rt.spawn(async move {
+        //             // process_block(block, sinkpools, filenums).await
+        //         })
+        //     )
+        //     },
+        //     _ => {
+        //         // Ignore other blocks
+        //         None
+        //     }
+        // }
+        // Some(
+        //     rt.spawn(async move {
+        //                     // process_block(block, sinkpools, filenums).await
+        //                 })
+        // )
+    });
+    println!("{}", futures.count());
+    // rt.block_on(async {
+    //     tokio::join!(futures::future::join_all(futures))
+    // });
+    // tokio::join!(futures::future::join_all(futures));
     // rt.block_on(future.await);
     Ok(())
 }
 
-async fn local_read(sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>, filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>) -> Result<(), osmpbf::Error> {
-    // let rt = tokio::runtime::Builder::new_multi_thread()
-    // .enable_all()
-    // .build()
-    // .unwrap();
-    let blob_reader = BlobReader::from_path(ARGS.get().unwrap().input.clone()).unwrap();
-    let stream = stream::iter(blob_reader);
-    stream.for_each_concurrent(cpu_count() / 2, |blob| async {
-        // TODO - fix unwrap
-        process_blob(blob.unwrap(), sinkpools.clone(), filenums.clone()).await
-    }).await;
-    // rt.block_on(future.await);
-    Ok(())
-}
+// async fn local_read(sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>, filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>) -> Result<(), osmpbf::Error> {
+//     // let rt = tokio::runtime::Builder::new_multi_thread()
+//     // .enable_all()
+//     // .build()
 
-pub async fn driver(args: Args) -> Result<(), io::Error> {
+//     // .unwrap();
+//     // let blob_reader = BlobReader::from_path(ARGS.get().unwrap().input.clone()).unwrap();
+//     // let stream = stream::iter(blob_reader);
+// TODO - keep concurrency here
+//     // stream.for_each_concurrent(cpu_count() / 2, |blob| async {
+//     //     // TODO - fix unwrap
+//     //     process_block(blob.unwrap(), sinkpools.clone(), filenums.clone()).await
+//     // }).await;
+//     // rt.block_on(future.await);
+//     Ok(())
+// }
+
+pub fn driver(args: Args) -> Result<(), io::Error> {
     // TODO - validation of args
     // Store value for reading across threads (write-once)
     let _ = ARGS.set(args.clone());
@@ -224,12 +287,12 @@ pub async fn driver(args: Args) -> Result<(), io::Error> {
         (OSMType::Relation, Arc::new(Mutex::new(0))),
     ]));
 
-    // TODO - fix this with match or something
-    if args.input.starts_with("s3://") {
-        s3_read(sinkpools.clone(), filenums.clone()).await;
-    } else {
-        local_read(sinkpools.clone(), filenums.clone()).await;
-    }
+    // TODO - re-implement for local
+    // if args.input.starts_with("s3://") {
+    s3_read(sinkpools.clone(), filenums.clone());
+    // } else {
+    //     local_read(sinkpools.clone(), filenums.clone());
+    // }
 
     // let get_sink_from_pool = |osm_type: OSMType| -> Result<ElementSink, std::io::Error> {
 
@@ -257,10 +320,11 @@ pub async fn driver(args: Args) -> Result<(), io::Error> {
     // })?;
 
     {
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
         for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {
-                sink.finish().await;
+                rt.block_on(sink.finish());
             }
         }
     }
