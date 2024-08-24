@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
-use sysinfo::System;
 use sysinfo::CpuRefreshKind;
 use sysinfo::RefreshKind;
+use sysinfo::System;
 
 use clap::Parser;
 
@@ -58,8 +58,7 @@ pub fn default_record_batch_size_mb() -> usize {
 }
 
 pub fn cpu_count() -> usize {
-    let system = System::new_with_specifics(
-        RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
-    );
+    let system =
+        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
     return system.cpus().len();
 }
