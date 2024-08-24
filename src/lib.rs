@@ -1,15 +1,11 @@
 use std::collections::HashMap;
 use std::io::{self};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::{boxed, thread};
 
-use futures::{future, StreamExt};
 use osmpbf::{BlobDecode, BlobReader, Element, PrimitiveBlock};
 use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
 use tokio::io::AsyncBufRead;
-use tokio_stream::{self as stream};
 use tokio_util::io::SyncIoBridge;
 
 pub mod osm_arrow;
@@ -17,7 +13,7 @@ pub mod sink;
 pub mod util;
 use crate::osm_arrow::OSMType;
 use crate::sink::ElementSink;
-use crate::util::{cpu_count, Args, ARGS};
+use crate::util::{Args, ARGS};
 
 pub async fn create_s3_async_reader() -> Result<impl AsyncBufRead, anyhow::Error> {
     let input_url = ARGS.get().unwrap().input.clone();
@@ -70,16 +66,16 @@ fn process_block(
     for element in block.elements() {
         match element {
             Element::Node(ref node) => {
-                node_sink.add_node(node);
+                let _ = node_sink.add_node(node);
             }
             Element::DenseNode(ref node) => {
-                node_sink.add_dense_node(node);
+                let _ = node_sink.add_dense_node(node);
             }
             Element::Way(ref way) => {
-                way_sink.add_way(way);
+                let _ = way_sink.add_way(way);
             }
             Element::Relation(ref rel) => {
-                rel_sink.add_relation(rel);
+                let _ = rel_sink.add_relation(rel);
             }
         }
     }
@@ -103,6 +99,7 @@ fn s3_read(
     let blob_reader = BlobReader::new(std::io::BufReader::new(sync_reader));
 
     for blob in blob_reader {
+        // TODO - the decode + process should work with a separate, non-tokio thread pool
         if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
             process_block(block, sinkpools.clone(), filenums.clone());
         }
@@ -142,16 +139,12 @@ pub fn driver(args: Args) -> Result<(), io::Error> {
     ]));
 
     if args.input.starts_with("s3://") {
-        s3_read(sinkpools.clone(), filenums.clone());
+        let _ = s3_read(sinkpools.clone(), filenums.clone());
     } else {
-        local_read(sinkpools.clone(), filenums.clone());
+        let _ = local_read(sinkpools.clone(), filenums.clone());
     }
 
     {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
         for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {

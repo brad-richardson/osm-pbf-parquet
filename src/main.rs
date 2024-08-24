@@ -1,5 +1,3 @@
-use std::io;
-
 use clap::Parser;
 
 use osm_pbf_parquet::driver;
