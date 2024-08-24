@@ -12,7 +12,7 @@ futures = "0.3.30"
 object_store = {version = "0.10.2", features = ["aws"] }
 osmpbf = "0.3.4"
 parquet = { version = "52.1.0", features = ["async"] }
-# rayon = "1.10.0"
+rayon = "1.10.0"
 sysinfo = "0.30.13"
 # TODO - reduce feature set here?
 tokio = { version =  "1.38.1", features = ["full"] }
@@ -23,7 +23,8 @@ aws-config = { version = "1", features = ["behavior-version-latest", "rt-tokio"]
 aws-sdk-s3 = { version = "1", features = ["behavior-version-latest", "rt-tokio"] }
 futures-core = "0.3.30"
 anyhow = "1.0.86"
-either = "1.13.0"
+crossbeam = "0.8.4"
+crossbeam-channel = "0.5.13"
 
 [dev-dependencies]
 criterion = "0.5.1"
