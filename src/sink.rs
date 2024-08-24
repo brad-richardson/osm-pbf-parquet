@@ -113,7 +113,7 @@ impl ElementSink {
         self.estimated_record_batch_bytes = 0;
     }
 
-    pub fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
+    fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
         if self.estimated_record_batch_bytes >= self.target_record_batch_bytes {
             self.finish_batch();
         }
@@ -186,7 +186,7 @@ impl ElementSink {
         path
     }
 
-    pub fn add_node(&mut self, node: &Node<'_>) -> Result<(), std::io::Error> {
+    pub fn add_node(&mut self, node: &Node) -> Result<(), std::io::Error> {
         let info = node.info();
         let user = info
             .user()
@@ -215,7 +215,7 @@ impl ElementSink {
         self.increment_and_cycle()
     }
 
-    pub fn add_dense_node(&mut self, node: &DenseNode<'_>) -> Result<(), std::io::Error> {
+    pub fn add_dense_node(&mut self, node: &DenseNode) -> Result<(), std::io::Error> {
         let info = node.info();
         let mut user: Option<String> = None;
         if let Some(info) = info {
@@ -243,7 +243,7 @@ impl ElementSink {
         self.increment_and_cycle()
     }
 
-    pub fn add_way(&mut self, way: &Way<'_>) -> Result<(), std::io::Error> {
+    pub fn add_way(&mut self, way: &Way) -> Result<(), std::io::Error> {
         let info = way.info();
         let user = info
             .user()
@@ -272,7 +272,7 @@ impl ElementSink {
         self.increment_and_cycle()
     }
 
-    pub fn add_relation(&mut self, relation: &Relation<'_>) -> Result<(), std::io::Error> {
+    pub fn add_relation(&mut self, relation: &Relation) -> Result<(), std::io::Error> {
         let info = relation.info();
         let user = info
             .user()

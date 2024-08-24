@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::{self};
 use std::sync::{Arc, Mutex};
 
 use osmpbf::{BlobDecode, BlobReader, Element, PrimitiveBlock};
@@ -55,8 +54,6 @@ fn process_block(
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) {
-    // let sinkpools = sinkpools.clone();
-    // let filenums = filenums.clone();
     let mut node_sink =
         get_sink_from_pool(OSMType::Node, sinkpools.clone(), filenums.clone()).unwrap();
     let mut way_sink =
@@ -90,7 +87,7 @@ fn s3_read(
 ) -> Result<(), osmpbf::Error> {
     // Create sync reader because underlying BlobReader is not async
     // Backed by multi-threaded runtime to allow fetch concurrency
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
@@ -99,11 +96,13 @@ fn s3_read(
     let blob_reader = BlobReader::new(std::io::BufReader::new(sync_reader));
 
     for blob in blob_reader {
+    // blob_reader.par_bridge().for_each(|blob| {
         // TODO - the decode + process should work with a separate, non-tokio thread pool
         if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
             process_block(block, sinkpools.clone(), filenums.clone());
         }
     }
+    // });
 
     Ok(())
 }
@@ -121,7 +120,7 @@ fn local_read(
     Ok(())
 }
 
-pub fn driver(args: Args) -> Result<(), io::Error> {
+pub fn driver(args: Args) -> Result<(), std::io::Error> {
     // TODO - validation of args
     // Store value for reading across threads (write-once)
     let _ = ARGS.set(args.clone());
