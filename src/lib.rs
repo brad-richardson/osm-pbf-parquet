@@ -87,7 +87,7 @@ fn s3_read(
 ) -> Result<(), osmpbf::Error> {
     // Create sync reader because underlying BlobReader is not async
     // Backed by multi-threaded runtime to allow fetch concurrency
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
@@ -95,14 +95,16 @@ fn s3_read(
     let sync_reader = SyncIoBridge::new_with_handle(async_reader, rt.handle().clone());
     let blob_reader = BlobReader::new(std::io::BufReader::new(sync_reader));
 
-    for blob in blob_reader {
-    // blob_reader.par_bridge().for_each(|blob| {
+    // TODO - test this with and without on larger files, small files suffer
+    // for blob in blob_reader {
+    // Using rayon here because SyncIoBridge can't run on tokio-enabled threads
+    blob_reader.par_bridge().for_each(|blob| {
         // TODO - the decode + process should work with a separate, non-tokio thread pool
         if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
             process_block(block, sinkpools.clone(), filenums.clone());
         }
-    }
-    // });
+        // }
+    });
 
     Ok(())
 }
