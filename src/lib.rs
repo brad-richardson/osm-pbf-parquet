@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use object_store::aws::AmazonS3Builder;
+use object_store::buffered::BufReader;
+use object_store::path::Path;
+use object_store::ObjectStore;
 use osmpbf::{BlobDecode, BlobReader, Element, PrimitiveBlock};
 use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
-use tokio::io::AsyncBufRead;
 use tokio_util::io::SyncIoBridge;
+use url::Url;
 
 pub mod osm_arrow;
 pub mod sink;
@@ -13,18 +17,6 @@ pub mod util;
 use crate::osm_arrow::OSMType;
 use crate::sink::ElementSink;
 use crate::util::{Args, ARGS};
-
-pub async fn create_s3_async_reader() -> Result<impl AsyncBufRead, anyhow::Error> {
-    let input_url = ARGS.get().unwrap().input.clone();
-    let path = input_url
-        .strip_prefix("s3://")
-        .expect("Error parsing S3 path");
-    let (bucket, key) = path.split_once('/').expect("Error parsing S3 path");
-    let sdk_config = aws_config::load_from_env().await;
-    let client = aws_sdk_s3::Client::new(&sdk_config);
-    let stream = client.get_object().bucket(bucket).key(key).send().await?;
-    Ok(stream.body.into_async_read())
-}
 
 fn get_sink_from_pool(
     osm_type: OSMType,
@@ -81,7 +73,19 @@ fn process_block(
     add_sink_to_pool(rel_sink, sinkpools.clone());
 }
 
+async fn create_s3_sync_reader(url: Url) -> SyncIoBridge<BufReader> {
+    let s3_store = AmazonS3Builder::from_env()
+        .with_url(url.clone())
+        .build()
+        .unwrap();
+    let path = Path::parse(url.path()).unwrap();
+    let meta = s3_store.head(&path).await.unwrap();
+    let buf_reader = BufReader::new(Arc::new(s3_store), &meta);
+    SyncIoBridge::new(buf_reader)
+}
+
 fn s3_read(
+    url: Url,
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<(), osmpbf::Error> {
@@ -91,29 +95,24 @@ fn s3_read(
         .enable_all()
         .build()
         .unwrap();
-    let async_reader = rt.block_on(create_s3_async_reader()).unwrap();
-    let sync_reader = SyncIoBridge::new_with_handle(async_reader, rt.handle().clone());
-    let blob_reader = BlobReader::new(std::io::BufReader::new(sync_reader));
+    let s3_sync_reader = rt.block_on(create_s3_sync_reader(url));
+    let blob_reader = BlobReader::new(s3_sync_reader);
 
-    // TODO - test this with and without on larger files, small files suffer
-    // for blob in blob_reader {
-    // Using rayon here because SyncIoBridge can't run on tokio-enabled threads
+    // Using rayon parallelize bridge here because SyncIoBridge can't run on tokio-enabled threads
     blob_reader.par_bridge().for_each(|blob| {
-        // TODO - the decode + process should work with a separate, non-tokio thread pool
         if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
             process_block(block, sinkpools.clone(), filenums.clone());
         }
-        // }
     });
-
     Ok(())
 }
 
 fn local_read(
+    path: &str,
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<(), osmpbf::Error> {
-    let blob_reader = BlobReader::from_path(ARGS.get().unwrap().input.clone()).unwrap();
+    let blob_reader = BlobReader::from_path(path).unwrap();
     blob_reader.par_bridge().for_each(|blob| {
         if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
             process_block(block, sinkpools.clone(), filenums.clone());
@@ -139,10 +138,11 @@ pub fn driver(args: Args) -> Result<(), std::io::Error> {
         (OSMType::Relation, Arc::new(Mutex::new(0))),
     ]));
 
-    if args.input.starts_with("s3://") {
-        let _ = s3_read(sinkpools.clone(), filenums.clone());
+    let full_path = args.input;
+    if let Ok(url) = Url::parse(&full_path) {
+        let _ = s3_read(url, sinkpools.clone(), filenums.clone());
     } else {
-        let _ = local_read(sinkpools.clone(), filenums.clone());
+        let _ = local_read(&full_path, sinkpools.clone(), filenums.clone());
     }
 
     {
