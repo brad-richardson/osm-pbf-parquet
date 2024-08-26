@@ -116,7 +116,7 @@ fn local_read(
 ) -> Result<(), osmpbf::Error> {
     let file = File::open(path).unwrap();
     let reader = std::io::BufReader::with_capacity(DEFAULT_BUF_READER_SIZE, file);
-    let blob_reader = BlobReader::new_seekable(reader).unwrap();
+    let blob_reader = BlobReader::new(reader).unwrap();
     blob_reader.par_bridge().for_each(|blob| {
         if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
             process_block(block, sinkpools.clone(), filenums.clone());

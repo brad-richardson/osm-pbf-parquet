@@ -4,6 +4,7 @@ debug/
 target/
 
 # Test outputs
+parquet/
 out/
 *.osm.pbf
 *.osm
