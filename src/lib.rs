@@ -73,15 +73,14 @@ fn process_block(
     add_sink_to_pool(rel_sink, sinkpools.clone());
 }
 
-async fn create_s3_sync_reader(url: Url) -> SyncIoBridge<BufReader> {
+async fn create_s3_async_reader(url: Url) -> BufReader {
     let s3_store = AmazonS3Builder::from_env()
         .with_url(url.clone())
         .build()
         .unwrap();
     let path = Path::parse(url.path()).unwrap();
     let meta = s3_store.head(&path).await.unwrap();
-    let buf_reader = BufReader::new(Arc::new(s3_store), &meta);
-    SyncIoBridge::new(buf_reader)
+    BufReader::new(Arc::new(s3_store), &meta)
 }
 
 fn s3_read(
@@ -95,8 +94,9 @@ fn s3_read(
         .enable_all()
         .build()
         .unwrap();
-    let s3_sync_reader = rt.block_on(create_s3_sync_reader(url));
-    let blob_reader = BlobReader::new(s3_sync_reader);
+    let s3_async_reader = rt.block_on(create_s3_async_reader(url));
+    let s3_sync_reader = SyncIoBridge::new_with_handle(s3_async_reader, rt.handle().clone());
+    let blob_reader = BlobReader::new(std::io::BufReader(s3_sync_reader));
 
     // Using rayon parallelize bridge here because SyncIoBridge can't run on tokio-enabled threads
     blob_reader.par_bridge().for_each(|blob| {

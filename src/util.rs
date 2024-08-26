@@ -1,6 +1,4 @@
 use std::sync::OnceLock;
-use sysinfo::CpuRefreshKind;
-use sysinfo::RefreshKind;
 use sysinfo::System;
 
 use clap::Parser;
@@ -55,10 +53,4 @@ pub fn default_record_batch_size_mb() -> usize {
     let system = System::new_all();
     // Estimate per thread available memory, leaving overhead for copies and system processes
     return ((system.total_memory() as usize / 1_000_000usize) / system.cpus().len()) / 8usize;
-}
-
-pub fn cpu_count() -> usize {
-    let system =
-        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
-    return system.cpus().len();
 }
