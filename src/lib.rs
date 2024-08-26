@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs::File;
 use std::sync::{Arc, Mutex};
 
 use object_store::aws::AmazonS3Builder;
@@ -16,7 +17,7 @@ pub mod sink;
 pub mod util;
 use crate::osm_arrow::OSMType;
 use crate::sink::ElementSink;
-use crate::util::{Args, ARGS};
+use crate::util::{Args, ARGS, DEFAULT_BUF_READER_SIZE};
 
 fn get_sink_from_pool(
     osm_type: OSMType,
@@ -80,7 +81,7 @@ async fn create_s3_async_reader(url: Url) -> BufReader {
         .unwrap();
     let path = Path::parse(url.path()).unwrap();
     let meta = s3_store.head(&path).await.unwrap();
-    BufReader::new(Arc::new(s3_store), &meta)
+    BufReader::with_capacity(Arc::new(s3_store), &meta, DEFAULT_BUF_READER_SIZE)
 }
 
 fn s3_read(
@@ -96,7 +97,7 @@ fn s3_read(
         .unwrap();
     let s3_async_reader = rt.block_on(create_s3_async_reader(url));
     let s3_sync_reader = SyncIoBridge::new_with_handle(s3_async_reader, rt.handle().clone());
-    let blob_reader = BlobReader::new(std::io::BufReader(s3_sync_reader));
+    let blob_reader = BlobReader::new(s3_sync_reader);
 
     // Using rayon parallelize bridge here because SyncIoBridge can't run on tokio-enabled threads
     blob_reader.par_bridge().for_each(|blob| {
@@ -112,7 +113,9 @@ fn local_read(
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<(), osmpbf::Error> {
-    let blob_reader = BlobReader::from_path(path).unwrap();
+    let file = File::open(path).unwrap();
+    let reader = std::io::BufReader::with_capacity(DEFAULT_BUF_READER_SIZE, file);
+    let blob_reader = BlobReader::new_seekable(reader).unwrap();
     blob_reader.par_bridge().for_each(|blob| {
         if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
             process_block(block, sinkpools.clone(), filenums.clone());

@@ -6,6 +6,9 @@ use clap::Parser;
 // Write once, safe read across threads
 pub static ARGS: OnceLock<Args> = OnceLock::new();
 
+// Max recommended size of a single blob within a PBF (16MB)
+pub const DEFAULT_BUF_READER_SIZE: usize = 1024 * 1024 * 16;
+
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Args {
