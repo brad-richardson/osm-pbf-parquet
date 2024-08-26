@@ -97,7 +97,8 @@ fn s3_read(
         .unwrap();
     let s3_async_reader = rt.block_on(create_s3_async_reader(url));
     let s3_sync_reader = SyncIoBridge::new_with_handle(s3_async_reader, rt.handle().clone());
-    let blob_reader = BlobReader::new(s3_sync_reader);
+    let sync_buf_reader = std::io::BufReader::with_capacity(DEFAULT_BUF_READER_SIZE, s3_sync_reader);
+    let blob_reader = BlobReader::new(sync_buf_reader);
 
     // Using rayon parallelize bridge here because SyncIoBridge can't run on tokio-enabled threads
     blob_reader.par_bridge().for_each(|blob| {
