@@ -6,6 +6,9 @@ use clap::Parser;
 // Write once, safe read across threads
 pub static ARGS: OnceLock<Args> = OnceLock::new();
 
+// Max recommended size of an uncompressed single blob is 16MB, assumes compression ratio of 2:1 or better
+pub const DEFAULT_BUF_READER_SIZE: usize = 1024 * 1024 * 8;
+
 #[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Args {

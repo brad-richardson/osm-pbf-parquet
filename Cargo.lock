@@ -1531,20 +1531,20 @@ dependencies = [
 
 [[package]]
 name = "osm-pbf-parquet"
-version = "0.1.0"
+version = "0.6.0"
 dependencies = [
  "arrow",
  "bytes",
  "clap",
  "criterion",
  "flate2",
- "futures",
  "object_store",
  "osmpbf",
  "parquet",
  "rayon",
  "sysinfo",
  "tokio",
+ "tokio-util",
  "url",
 ]
 
