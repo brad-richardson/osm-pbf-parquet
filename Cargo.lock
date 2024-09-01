@@ -1553,7 +1553,7 @@ dependencies = [
 
 [[package]]
 name = "osm-pbf-parquet"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1576,6 +1576,7 @@ dependencies = [
 [[package]]
 name = "osmpbf"
 version = "0.3.4"
+source = "git+https://github.com/brad-richardson/osmpbf.git?branch=async-blob-reader#e9f8c6eafcad435f0bca4be83638c8ded6417465"
 dependencies = [
  "async-stream",
  "byteorder",
