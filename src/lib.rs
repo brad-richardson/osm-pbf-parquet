@@ -2,16 +2,16 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::sync::{Arc, Mutex};
 
+use futures::StreamExt;
+use futures_util::pin_mut;
 use object_store::aws::AmazonS3Builder;
 use object_store::buffered::BufReader;
 use object_store::path::Path;
 use object_store::ObjectStore;
-use osmpbf::{BlobDecode, AsyncBlobReader, BlobReader, Element, PrimitiveBlock};
+use osmpbf::{AsyncBlobReader, BlobDecode, BlobReader, Element, PrimitiveBlock};
 use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
 use url::Url;
-use futures::StreamExt;
-use futures_util::pin_mut;
 
 pub mod osm_arrow;
 pub mod sink;
@@ -81,9 +81,12 @@ async fn create_s3_buf_reader(url: Url) -> Result<BufReader, anyhow::Error> {
         .build()
         .unwrap();
     let path = Path::parse(url.path())?;
-    println!("path: {:?}", path);
     let meta = s3_store.head(&path).await?;
-    Ok(BufReader::with_capacity(Arc::new(s3_store), &meta, DEFAULT_BUF_READER_SIZE))
+    Ok(BufReader::with_capacity(
+        Arc::new(s3_store),
+        &meta,
+        DEFAULT_BUF_READER_SIZE,
+    ))
 }
 
 async fn s3_read(
@@ -92,7 +95,7 @@ async fn s3_read(
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<(), anyhow::Error> {
     let s3_buf_reader = create_s3_buf_reader(url).await?;
-    
+
     let mut blob_reader = AsyncBlobReader::new(s3_buf_reader);
 
     let stream = blob_reader.stream();
