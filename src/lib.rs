@@ -11,8 +11,8 @@ use object_store::ObjectStore;
 use osmpbf::{AsyncBlobReader, BlobDecode, BlobReader, Element, PrimitiveBlock};
 use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
-use url::Url;
 use tokio::runtime::Handle;
+use url::Url;
 
 pub mod osm_arrow;
 pub mod sink;
@@ -58,16 +58,16 @@ async fn process_block(
     for element in block.elements() {
         match element {
             Element::Node(ref node) => {
-                let _ = node_sink.add_node(node);
+                node_sink.add_node(node);
             }
             Element::DenseNode(ref node) => {
-                let _ = node_sink.add_dense_node(node);
+                node_sink.add_dense_node(node);
             }
             Element::Way(ref way) => {
-                let _ = way_sink.add_way(way);
+                way_sink.add_way(way);
             }
             Element::Relation(ref rel) => {
-                let _ = rel_sink.add_relation(rel);
+                rel_sink.add_relation(rel);
             }
         }
     }
@@ -114,10 +114,10 @@ async fn s3_read(
                 Ok(BlobDecode::OsmHeader(_)) => (),
                 Ok(BlobDecode::OsmData(block)) => {
                     process_block(block, sinkpools.clone(), filenums.clone()).await;
-                },
+                }
                 Ok(BlobDecode::Unknown(unknown)) => {
                     panic!("Unknown blob: {}", unknown);
-                },
+                }
                 Err(error) => {
                     panic!("Error decoding blob: {}", error);
                 }
@@ -174,20 +174,28 @@ pub async fn driver(args: Args) -> Result<(), anyhow::Error> {
 
     let full_path = args.input;
     if let Ok(url) = Url::parse(&full_path) {
-        let result = s3_read(url, sinkpools.clone(), filenums.clone()).await;
-        result.unwrap();
+        s3_read(url, sinkpools.clone(), filenums.clone())
+            .await
+            .unwrap();
     } else {
-        let result = local_read(&full_path, sinkpools.clone(), filenums.clone()).await;
-        result.unwrap();
+        local_read(&full_path, sinkpools.clone(), filenums.clone())
+            .await
+            .unwrap();
     }
 
     {
+        let handle = Handle::current();
+        let mut futures = vec![];
         for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {
-                sink.finish().await;
+                let f = handle.spawn(async move {
+                    sink.finish().await;
+                });
+                futures.push(f);
             }
         }
+        futures::future::join_all(futures).await;
     }
     Ok(())
 }

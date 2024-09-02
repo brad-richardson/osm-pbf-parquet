@@ -223,7 +223,7 @@ impl ElementSink {
         self.estimated_record_batch_bytes += est_size_bytes;
     }
 
-    pub fn add_way(&mut self, way: &Way) -> () {
+    pub fn add_way(&mut self, way: &Way) {
         let info = way.info();
         let user = info
             .user()
@@ -250,7 +250,7 @@ impl ElementSink {
         self.estimated_record_batch_bytes += est_size_bytes;
     }
 
-    pub fn add_relation(&mut self, relation: &Relation) -> () {
+    pub fn add_relation(&mut self, relation: &Relation) {
         let info = relation.info();
         let user = info
             .user()
