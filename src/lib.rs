@@ -12,6 +12,7 @@ use osmpbf::{AsyncBlobReader, BlobDecode, BlobReader, Element, PrimitiveBlock};
 use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
 use url::Url;
+use tokio::runtime::Handle;
 
 pub mod osm_arrow;
 pub mod sink;
@@ -43,7 +44,7 @@ fn add_sink_to_pool(
     pool.push(sink);
 }
 
-fn process_block(
+async fn process_block(
     block: PrimitiveBlock,
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
@@ -70,6 +71,9 @@ fn process_block(
             }
         }
     }
+    node_sink.increment_and_cycle().await.unwrap();
+    way_sink.increment_and_cycle().await.unwrap();
+    rel_sink.increment_and_cycle().await.unwrap();
     add_sink_to_pool(node_sink, sinkpools.clone());
     add_sink_to_pool(way_sink, sinkpools.clone());
     add_sink_to_pool(rel_sink, sinkpools.clone());
@@ -106,8 +110,17 @@ async fn s3_read(
         let sinkpools = sinkpools.clone();
         let filenums = filenums.clone();
         let f = tokio::spawn(async move {
-            if let Ok(BlobDecode::OsmData(block)) = blob.decode() {
-                process_block(block, sinkpools.clone(), filenums.clone());
+            match blob.decode() {
+                Ok(BlobDecode::OsmHeader(_)) => (),
+                Ok(BlobDecode::OsmData(block)) => {
+                    process_block(block, sinkpools.clone(), filenums.clone()).await;
+                },
+                Ok(BlobDecode::Unknown(unknown)) => {
+                    panic!("Unknown blob: {}", unknown);
+                },
+                Err(error) => {
+                    panic!("Error decoding blob: {}", error);
+                }
             }
         });
         futures.push(f);
@@ -116,7 +129,7 @@ async fn s3_read(
     Ok(())
 }
 
-fn local_read(
+async fn local_read(
     path: &str,
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
@@ -124,18 +137,28 @@ fn local_read(
     let file = File::open(path).unwrap();
     let reader = std::io::BufReader::with_capacity(DEFAULT_BUF_READER_SIZE, file);
     let blob_reader = BlobReader::new(reader);
+    let handle = Handle::current();
     blob_reader.par_bridge().for_each(|blob| {
-        if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
-            process_block(block, sinkpools.clone(), filenums.clone());
-        }
+        let sinkpools = sinkpools.clone();
+        let filenums = filenums.clone();
+        handle.block_on(async {
+            if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
+                process_block(block, sinkpools.clone(), filenums.clone()).await;
+            }
+        });
     });
     Ok(())
 }
 
-pub fn driver(args: Args) -> Result<(), std::io::Error> {
+pub async fn driver(args: Args) -> Result<(), anyhow::Error> {
     // TODO - validation of args
     // Store value for reading across threads (write-once)
     let _ = ARGS.set(args.clone());
+
+    // Verify we're running in a tokio runtime
+    Handle::current().spawn_blocking(|| {
+        // This is a no-op, but it will panic if we're not in a tokio runtime
+    });
 
     let sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>> = Arc::new(HashMap::from([
         (OSMType::Node, Arc::new(Mutex::new(vec![]))),
@@ -151,15 +174,10 @@ pub fn driver(args: Args) -> Result<(), std::io::Error> {
 
     let full_path = args.input;
     if let Ok(url) = Url::parse(&full_path) {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let result = rt.block_on(s3_read(url, sinkpools.clone(), filenums.clone()));
-        // TODO - better error handling
+        let result = s3_read(url, sinkpools.clone(), filenums.clone()).await;
         result.unwrap();
     } else {
-        let result = local_read(&full_path, sinkpools.clone(), filenums.clone());
+        let result = local_read(&full_path, sinkpools.clone(), filenums.clone()).await;
         result.unwrap();
     }
 
@@ -167,7 +185,7 @@ pub fn driver(args: Args) -> Result<(), std::io::Error> {
         for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {
-                sink.finish();
+                sink.finish().await;
             }
         }
     }

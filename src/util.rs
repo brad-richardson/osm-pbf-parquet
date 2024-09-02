@@ -25,6 +25,10 @@ pub struct Args {
     #[arg(long, default_value_t = 3)]
     pub compression: u8,
 
+    /// Worker thread count, default CPU count
+    #[arg(long)]
+    pub worker_threads: Option<usize>,
+
     /// Override target record batch size, balance this with available memory
     /// default is total memory (MB) / CPU count / 8
     #[arg(long)]
@@ -45,6 +49,7 @@ impl Args {
             input,
             output,
             compression,
+            worker_threads: None,
             record_batch_target_mb: None,
             max_row_group_count: None,
             file_target_mb: 500usize,
@@ -56,4 +61,9 @@ pub fn default_record_batch_size_mb() -> usize {
     let system = System::new_all();
     // Estimate per thread available memory, leaving overhead for copies and system processes
     return ((system.total_memory() as usize / 1_000_000usize) / system.cpus().len()) / 8usize;
+}
+
+pub fn default_worker_thread_count() -> usize {
+    let system = System::new_all();
+    return system.cpus().len();
 }

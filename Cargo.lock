@@ -1576,11 +1576,10 @@ dependencies = [
 [[package]]
 name = "osmpbf"
 version = "0.3.4"
-source = "git+https://github.com/brad-richardson/osmpbf.git?branch=async-blob-reader#e9f8c6eafcad435f0bca4be83638c8ded6417465"
+source = "git+https://github.com/brad-richardson/osmpbf.git?branch=async-blob-reader#d2793f3db1a4d7a62d2e93f67798c1da98e57000"
 dependencies = [
  "async-stream",
  "byteorder",
- "bytes",
  "flate2",
  "memmap2",
  "object_store",
@@ -1748,7 +1747,6 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df67496db1a89596beaced1579212e9b7c53c22dca1d9745de00ead76573d514"
 dependencies = [
- "bytes",
  "once_cell",
  "protobuf-support",
  "thiserror",
