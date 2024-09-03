@@ -96,7 +96,7 @@ impl ElementSink {
         }
 
         self.estimated_record_batch_bytes = 0;
-        return Ok(());
+        Ok(())
     }
 
     pub async fn increment_and_cycle(&mut self) -> Result<(), anyhow::Error> {

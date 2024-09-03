@@ -82,7 +82,7 @@ async fn process_block(
     add_sink_to_pool(way_sink, sinkpools.clone());
     add_sink_to_pool(rel_sink, sinkpools.clone());
 
-    return Ok(block_counter);
+    Ok(block_counter)
 }
 
 async fn create_s3_buf_reader(url: Url) -> Result<BufReader, anyhow::Error> {
