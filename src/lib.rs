@@ -130,13 +130,13 @@ async fn process_blobs(
         .unwrap()
         .worker_threads
         .unwrap_or(default_worker_thread_count());
-    let semaphore = Semaphore::new(active_tasks);
+    let semaphore = Arc::new(Semaphore::new(active_tasks));
 
     let mut join_set = JoinSet::new();
     while let Some(Ok(blob)) = stream.next().await {
-        let _permit = semaphore.acquire().await.unwrap();
         let sinkpools = sinkpools.clone();
         let filenums = filenums.clone();
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
         join_set.spawn(async move {
             match blob.decode() {
                 Ok(BlobDecode::OsmHeader(_)) => (),
@@ -152,6 +152,7 @@ async fn process_blobs(
                     panic!("Error decoding blob: {}", error);
                 }
             }
+            drop(permit);
         });
     }
     while let Some(result) = join_set.join_next().await {
