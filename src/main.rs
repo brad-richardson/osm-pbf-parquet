@@ -1,10 +1,11 @@
 use clap::Parser;
+use env_logger::{Builder, Env};
 
 use osm_pbf_parquet::driver;
 use osm_pbf_parquet::util::{default_worker_thread_count, Args};
 
 fn main() {
-    env_logger::init();
+    Builder::from_env(Env::default().default_filter_or("info")).init();
 
     let args = Args::parse();
     println!("{:?}", args);

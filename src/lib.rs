@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use futures_util::pin_mut;
 use log::info;
@@ -12,6 +11,8 @@ use object_store::path::Path;
 use object_store::ObjectStore;
 use osmpbf::{AsyncBlobReader, BlobDecode, Element, PrimitiveBlock};
 use tokio::runtime::Handle;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use url::Url;
 
 pub mod osm_arrow;
@@ -19,7 +20,9 @@ pub mod sink;
 pub mod util;
 use crate::osm_arrow::OSMType;
 use crate::sink::ElementSink;
-use crate::util::{Args, ARGS, DEFAULT_BUF_READER_SIZE, ELEMENT_COUNTER};
+use crate::util::{
+    default_worker_thread_count, Args, ARGS, DEFAULT_BUF_READER_SIZE, ELEMENT_COUNTER,
+};
 
 fn get_sink_from_pool(
     osm_type: OSMType,
@@ -106,20 +109,35 @@ async fn create_local_buf_reader(path: &str) -> Result<BufReader, anyhow::Error>
     ))
 }
 
-async fn process_blobs(buf_reader: BufReader,
+async fn process_blobs(
+    buf_reader: BufReader,
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
-    filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<(), anyhow::Error> {
     let mut blob_reader = AsyncBlobReader::new(buf_reader);
 
     let stream = blob_reader.stream();
     pin_mut!(stream);
 
-    let futures = FuturesUnordered::new();
+    let filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>> = Arc::new(HashMap::from([
+        (OSMType::Node, Arc::new(Mutex::new(0))),
+        (OSMType::Way, Arc::new(Mutex::new(0))),
+        (OSMType::Relation, Arc::new(Mutex::new(0))),
+    ]));
+
+    // Avoid too many tasks in memory
+    let active_tasks = 4 * ARGS
+        .get()
+        .unwrap()
+        .worker_threads
+        .unwrap_or(default_worker_thread_count());
+    let semaphore = Semaphore::new(active_tasks);
+
+    let mut join_set = JoinSet::new();
     while let Some(Ok(blob)) = stream.next().await {
+        let _permit = semaphore.acquire().await.unwrap();
         let sinkpools = sinkpools.clone();
         let filenums = filenums.clone();
-        let f = tokio::spawn(async move {
+        join_set.spawn(async move {
             match blob.decode() {
                 Ok(BlobDecode::OsmHeader(_)) => (),
                 Ok(BlobDecode::OsmData(block)) => {
@@ -135,10 +153,9 @@ async fn process_blobs(buf_reader: BufReader,
                 }
             }
         });
-        futures.push(f);
     }
-    for future in futures {
-        future.await?;
+    while let Some(result) = join_set.join_next().await {
+        result?;
     }
     Ok(())
 }
@@ -171,12 +188,6 @@ pub async fn driver(args: Args) -> Result<(), anyhow::Error> {
         (OSMType::Relation, Arc::new(Mutex::new(vec![]))),
     ]));
 
-    let filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>> = Arc::new(HashMap::from([
-        (OSMType::Node, Arc::new(Mutex::new(0))),
-        (OSMType::Way, Arc::new(Mutex::new(0))),
-        (OSMType::Relation, Arc::new(Mutex::new(0))),
-    ]));
-
     // Verify we're running in a tokio runtime and start separate logging thread
     Handle::current().spawn(async { progress_log().await });
 
@@ -186,23 +197,25 @@ pub async fn driver(args: Args) -> Result<(), anyhow::Error> {
     } else {
         create_local_buf_reader(&full_path).await?
     };
-    process_blobs(buf_reader, sinkpools.clone(), filenums.clone()).await?;
+    process_blobs(buf_reader, sinkpools.clone()).await?;
 
     {
         let handle = Handle::current();
-        let futures = FuturesUnordered::new();
+        let mut join_set = JoinSet::new();
         for sinkpool in sinkpools.values() {
             let mut pool = sinkpool.lock().unwrap();
             for mut sink in pool.drain(..) {
-                let f = handle.spawn(async move {
-                    // TODO - handle this
-                    sink.finish().await.unwrap();
-                });
-                futures.push(f);
+                join_set.spawn_on(
+                    async move {
+                        // TODO - handle this
+                        sink.finish().await.unwrap();
+                    },
+                    &handle,
+                );
             }
         }
-        for result in futures {
-            result.await?;
+        while let Some(result) = join_set.join_next().await {
+            result?;
         }
     }
     Ok(())
