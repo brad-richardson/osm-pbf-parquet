@@ -1605,7 +1605,6 @@ dependencies = [
  "object_store",
  "osmpbf",
  "parquet",
- "rayon",
  "sysinfo",
  "tokio",
  "tokio-util",

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs::File;
 use std::sync::{Arc, Mutex};
 
 use futures::stream::FuturesUnordered;
@@ -8,11 +7,10 @@ use futures_util::pin_mut;
 use log::info;
 use object_store::aws::AmazonS3Builder;
 use object_store::buffered::BufReader;
+use object_store::local::LocalFileSystem;
 use object_store::path::Path;
 use object_store::ObjectStore;
-use osmpbf::{AsyncBlobReader, BlobDecode, BlobReader, Element, PrimitiveBlock};
-use rayon::iter::ParallelBridge;
-use rayon::iter::ParallelIterator;
+use osmpbf::{AsyncBlobReader, BlobDecode, Element, PrimitiveBlock};
 use tokio::runtime::Handle;
 use url::Url;
 
@@ -96,14 +94,23 @@ async fn create_s3_buf_reader(url: Url) -> Result<BufReader, anyhow::Error> {
     ))
 }
 
-async fn s3_read(
-    url: Url,
+async fn create_local_buf_reader(path: &str) -> Result<BufReader, anyhow::Error> {
+    let local_store: LocalFileSystem = LocalFileSystem::new();
+    let path = std::path::Path::new(path);
+    let filesystem_path = object_store::path::Path::from_filesystem_path(path)?;
+    let meta = local_store.head(&filesystem_path).await?;
+    Ok(BufReader::with_capacity(
+        Arc::new(local_store),
+        &meta,
+        DEFAULT_BUF_READER_SIZE,
+    ))
+}
+
+async fn process_blobs(buf_reader: BufReader,
     sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<(), anyhow::Error> {
-    let s3_buf_reader = create_s3_buf_reader(url).await?;
-
-    let mut blob_reader = AsyncBlobReader::new(s3_buf_reader);
+    let mut blob_reader = AsyncBlobReader::new(buf_reader);
 
     let stream = blob_reader.stream();
     pin_mut!(stream);
@@ -136,30 +143,7 @@ async fn s3_read(
     Ok(())
 }
 
-async fn local_read(
-    path: &str,
-    sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
-    filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
-) -> Result<(), anyhow::Error> {
-    let file = File::open(path)?;
-    let reader = std::io::BufReader::with_capacity(DEFAULT_BUF_READER_SIZE, file);
-    let blob_reader = BlobReader::new(reader);
-    let handle = Handle::current();
-    blob_reader.par_bridge().for_each(|blob| {
-        let sinkpools = sinkpools.clone();
-        let filenums = filenums.clone();
-        handle.block_on(async {
-            if let BlobDecode::OsmData(block) = blob.unwrap().decode().unwrap() {
-                process_block(block, sinkpools.clone(), filenums.clone())
-                    .await
-                    .unwrap();
-            }
-        });
-    });
-    Ok(())
-}
-
-pub async fn progress_log() {
+async fn progress_log() {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
     interval.tick().await; // First tick is immediate
 
@@ -197,11 +181,12 @@ pub async fn driver(args: Args) -> Result<(), anyhow::Error> {
     Handle::current().spawn(async { progress_log().await });
 
     let full_path = args.input;
-    if let Ok(url) = Url::parse(&full_path) {
-        s3_read(url, sinkpools.clone(), filenums.clone()).await?;
+    let buf_reader = if let Ok(url) = Url::parse(&full_path) {
+        create_s3_buf_reader(url).await?
     } else {
-        local_read(&full_path, sinkpools.clone(), filenums.clone()).await?;
-    }
+        create_local_buf_reader(&full_path).await?
+    };
+    process_blobs(buf_reader, sinkpools.clone(), filenums.clone()).await?;
 
     {
         let handle = Handle::current();

@@ -16,7 +16,6 @@ log = "0.4.*"
 object_store = {version = "0.10.2", features = ["aws"] }
 osmpbf = { version = "0.3.*", features = ["zlib-ng", "async"], default-features = false, git = "https://github.com/brad-richardson/osmpbf.git", branch = "async-blob-reader" }
 parquet = { version = "52.*", features = ["async"] }
-rayon = "1.*"
 sysinfo = "0.31.*"
 tokio = { version =  "1.*", features = ["rt", "rt-multi-thread", "io-util"] }
 tokio-util = {version = "0.7.*", features = ["io-util"] }
