@@ -23,7 +23,7 @@ pub struct ElementSink {
 
     // Arrow wrappers
     osm_builder: Box<OSMArrowBuilder>,
-    writer: Option<AsyncArrowWriter<BufWriter>>,
+    writer: Option<AsyncArrowWriter<BufWriter>>, // Wrapped so we can replace this on the fly
 
     // State tracking for batching
     estimated_record_batch_bytes: usize,
@@ -33,12 +33,12 @@ pub struct ElementSink {
 }
 
 impl ElementSink {
-    pub fn new(filenum: Arc<Mutex<u64>>, osm_type: OSMType) -> Result<Self, std::io::Error> {
+    pub fn new(filenum: Arc<Mutex<u64>>, osm_type: OSMType) -> Result<Self, anyhow::Error> {
         let args = ARGS.get().unwrap();
 
         let full_path = Self::create_full_path(&args.output, &osm_type, &filenum, args.compression);
-        let buf_writer = Self::create_buf_writer(&full_path);
-        let writer = Self::create_writer(buf_writer, args.compression, args.max_row_group_count);
+        let buf_writer = Self::create_buf_writer(&full_path)?;
+        let writer = Self::create_writer(buf_writer, args.compression, args.max_row_group_count)?;
 
         let target_record_batch_bytes = args
             .record_batch_target_mb
@@ -59,23 +59,24 @@ impl ElementSink {
         })
     }
 
-    pub async fn finish(&mut self) {
-        self.finish_batch().await;
-        self.writer.take().unwrap().close().await.unwrap();
+    pub async fn finish(&mut self) -> Result<(), anyhow::Error> {
+        self.finish_batch().await?;
+        self.writer.take().unwrap().close().await?;
+        Ok(())
     }
 
-    async fn finish_batch(&mut self) {
+    async fn finish_batch(&mut self) -> Result<(), anyhow::Error> {
         if self.estimated_record_batch_bytes == 0 {
             // Nothing to write
-            return;
+            return Ok(());
         }
-        let batch = self.osm_builder.finish().unwrap();
-        self.writer.as_mut().unwrap().write(&batch).await.unwrap();
+        let batch = self.osm_builder.finish()?;
+        self.writer.as_mut().unwrap().write(&batch).await?;
 
         // Reset writer to new path if needed
         self.estimated_file_bytes += self.estimated_record_batch_bytes;
         if self.estimated_file_bytes >= self.target_file_bytes {
-            self.writer.take().unwrap().close().await.unwrap();
+            self.writer.take().unwrap().close().await?;
 
             // Create new writer and output
             let args = ARGS.get().unwrap();
@@ -85,41 +86,39 @@ impl ElementSink {
                 &self.filenum,
                 args.compression,
             );
-            let buf_writer = Self::create_buf_writer(&full_path);
+            let buf_writer = Self::create_buf_writer(&full_path)?;
             self.writer = Some(Self::create_writer(
                 buf_writer,
                 args.compression,
                 args.max_row_group_count,
-            ));
+            )?);
             self.estimated_file_bytes = 0;
         }
 
         self.estimated_record_batch_bytes = 0;
+        return Ok(());
     }
 
-    pub async fn increment_and_cycle(&mut self) -> Result<(), std::io::Error> {
+    pub async fn increment_and_cycle(&mut self) -> Result<(), anyhow::Error> {
         if self.estimated_record_batch_bytes >= self.target_record_batch_bytes {
-            self.finish_batch().await;
+            self.finish_batch().await?;
         }
         Ok(())
     }
 
-    fn create_buf_writer(full_path: &str) -> BufWriter {
+    fn create_buf_writer(full_path: &str) -> Result<BufWriter, anyhow::Error> {
         // TODO - better validation of URL/paths here and error handling
         if let Ok(url) = Url::parse(full_path) {
-            let s3_store = AmazonS3Builder::from_env()
-                .with_url(url.clone())
-                .build()
-                .unwrap();
-            let path = Path::parse(url.path()).unwrap();
+            let s3_store = AmazonS3Builder::from_env().with_url(url.clone()).build()?;
+            let path = Path::parse(url.path())?;
 
-            BufWriter::new(Arc::new(s3_store), path)
+            Ok(BufWriter::new(Arc::new(s3_store), path))
         } else {
             let object_store = LocalFileSystem::new();
-            let absolute_path = absolute(full_path).unwrap();
-            let store_path = Path::from_absolute_path(absolute_path).unwrap();
+            let absolute_path = absolute(full_path)?;
+            let store_path = Path::from_absolute_path(absolute_path)?;
 
-            BufWriter::new(Arc::new(object_store), store_path)
+            Ok(BufWriter::new(Arc::new(object_store), store_path))
         }
     }
 
@@ -127,21 +126,21 @@ impl ElementSink {
         buffer: BufWriter,
         compression: u8,
         max_row_group_rows: Option<usize>,
-    ) -> AsyncArrowWriter<BufWriter> {
+    ) -> Result<AsyncArrowWriter<BufWriter>, anyhow::Error> {
         let mut props_builder = WriterProperties::builder();
         if compression == 0 {
             props_builder = props_builder.set_compression(Compression::UNCOMPRESSED);
-        } else {
-            props_builder = props_builder.set_compression(Compression::ZSTD(
-                ZstdLevel::try_new(compression as i32).unwrap(),
-            ));
+        } else if compression > 0 && compression <= 22 {
+            props_builder = props_builder
+                .set_compression(Compression::ZSTD(ZstdLevel::try_new(compression as i32)?));
         }
         if let Some(max_rows) = max_row_group_rows {
             props_builder = props_builder.set_max_row_group_size(max_rows);
         }
         let props = props_builder.build();
 
-        AsyncArrowWriter::try_new(buffer, Arc::new(osm_arrow_schema()), Some(props)).unwrap()
+        let writer = AsyncArrowWriter::try_new(buffer, Arc::new(osm_arrow_schema()), Some(props))?;
+        Ok(writer)
     }
 
     fn create_full_path(

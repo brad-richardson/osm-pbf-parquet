@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 use std::sync::OnceLock;
 use sysinfo::System;
 
@@ -5,6 +6,9 @@ use clap::Parser;
 
 // Write once, safe read across threads
 pub static ARGS: OnceLock<Args> = OnceLock::new();
+
+// Element counter to track read progress
+pub static ELEMENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Max recommended size of an uncompressed single blob is 16MB, assumes compression ratio of 2:1 or better
 pub const DEFAULT_BUF_READER_SIZE: usize = 1024 * 1024 * 8;
