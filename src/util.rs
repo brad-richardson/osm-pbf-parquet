@@ -33,7 +33,10 @@ pub struct Args {
     #[arg(long)]
     pub worker_threads: Option<usize>,
 
+    /// Advanced options:
+
     /// Input buffer size, default 8MB
+    #[arg(long)]
     pub input_buffer_size_mb: Option<usize>,
 
     /// Override target record batch size, balance this with available memory
