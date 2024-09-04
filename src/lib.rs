@@ -24,9 +24,11 @@ use crate::util::{
     default_worker_thread_count, Args, ARGS, DEFAULT_BUF_READER_SIZE, ELEMENT_COUNTER,
 };
 
+type SinkpoolStore = HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>;
+
 fn get_sink_from_pool(
     osm_type: OSMType,
-    sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
+    sinkpools: Arc<SinkpoolStore>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<ElementSink, anyhow::Error> {
     {
@@ -38,10 +40,7 @@ fn get_sink_from_pool(
     ElementSink::new(filenums[&osm_type].clone(), osm_type)
 }
 
-fn add_sink_to_pool(
-    sink: ElementSink,
-    sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
-) {
+fn add_sink_to_pool(sink: ElementSink, sinkpools: Arc<SinkpoolStore>) {
     let osm_type = sink.osm_type.clone();
     let mut pool = sinkpools[&osm_type].lock().unwrap();
     pool.push(sink);
@@ -49,7 +48,7 @@ fn add_sink_to_pool(
 
 async fn process_block(
     block: PrimitiveBlock,
-    sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
+    sinkpools: Arc<SinkpoolStore>,
     filenums: Arc<HashMap<OSMType, Arc<Mutex<u64>>>>,
 ) -> Result<u64, anyhow::Error> {
     let mut node_sink = get_sink_from_pool(OSMType::Node, sinkpools.clone(), filenums.clone())?;
@@ -111,7 +110,7 @@ async fn create_local_buf_reader(path: &str) -> Result<BufReader, anyhow::Error>
 
 async fn process_blobs(
     buf_reader: BufReader,
-    sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>>,
+    sinkpools: Arc<SinkpoolStore>,
 ) -> Result<(), anyhow::Error> {
     let mut blob_reader = AsyncBlobReader::new(buf_reader);
 
@@ -125,7 +124,7 @@ async fn process_blobs(
     ]));
 
     // Avoid too many tasks in memory
-    let active_tasks = 4 * ARGS
+    let active_tasks = 2 * ARGS
         .get()
         .unwrap()
         .worker_threads
@@ -161,12 +160,17 @@ async fn process_blobs(
     Ok(())
 }
 
-async fn progress_log() {
+async fn monitor(sinkpools: Arc<SinkpoolStore>) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
     interval.tick().await; // First tick is immediate
 
     loop {
         interval.tick().await;
+
+        // Run cleanup
+        finish_sinks(sinkpools.clone(), false).await.unwrap();
+
+        // Log progress
         let processed = ELEMENT_COUNTER.load(std::sync::atomic::Ordering::Relaxed);
         let mut processed_str = format!("{}", processed);
         if processed >= 1_000_000_000 {
@@ -178,19 +182,50 @@ async fn progress_log() {
     }
 }
 
+async fn finish_sinks(
+    sinkpools: Arc<SinkpoolStore>,
+    force_finish: bool,
+) -> Result<(), anyhow::Error> {
+    let handle = Handle::current();
+    let mut join_set = JoinSet::new();
+    for sinkpool in sinkpools.values() {
+        let mut pool = sinkpool.lock().unwrap();
+        let sinks = pool.drain(..).collect::<Vec<_>>();
+        for mut sink in sinks {
+            if force_finish || sink.last_write_cycle.elapsed().as_secs() > 30 {
+                // Finish, old or final cleanup run
+                join_set.spawn_on(
+                    async move {
+                        sink.finish().await.unwrap();
+                    },
+                    &handle,
+                );
+            } else {
+                // Retain, still being written to
+                pool.push(sink);
+            }
+        }
+    }
+    while let Some(result) = join_set.join_next().await {
+        result?;
+    }
+    Ok(())
+}
+
 pub async fn driver(args: Args) -> Result<(), anyhow::Error> {
     // TODO - validation of args
     // Store value for reading across threads (write-once)
     let _ = ARGS.set(args.clone());
 
-    let sinkpools: Arc<HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>> = Arc::new(HashMap::from([
+    let sinkpools: Arc<SinkpoolStore> = Arc::new(HashMap::from([
         (OSMType::Node, Arc::new(Mutex::new(vec![]))),
         (OSMType::Way, Arc::new(Mutex::new(vec![]))),
         (OSMType::Relation, Arc::new(Mutex::new(vec![]))),
     ]));
 
-    // Verify we're running in a tokio runtime and start separate logging thread
-    Handle::current().spawn(async { progress_log().await });
+    // Verify we're running in a tokio runtime and start separate monitoring thread
+    let sinkpool_monitor = sinkpools.clone();
+    Handle::current().spawn(async move { monitor(sinkpool_monitor).await });
 
     let full_path = args.input;
     let buf_reader = if let Ok(url) = Url::parse(&full_path) {
@@ -200,24 +235,7 @@ pub async fn driver(args: Args) -> Result<(), anyhow::Error> {
     };
     process_blobs(buf_reader, sinkpools.clone()).await?;
 
-    {
-        let handle = Handle::current();
-        let mut join_set = JoinSet::new();
-        for sinkpool in sinkpools.values() {
-            let mut pool = sinkpool.lock().unwrap();
-            for mut sink in pool.drain(..) {
-                join_set.spawn_on(
-                    async move {
-                        // TODO - handle this
-                        sink.finish().await.unwrap();
-                    },
-                    &handle,
-                );
-            }
-        }
-        while let Some(result) = join_set.join_next().await {
-            result?;
-        }
-    }
+    finish_sinks(sinkpools.clone(), true).await?;
+
     Ok(())
 }

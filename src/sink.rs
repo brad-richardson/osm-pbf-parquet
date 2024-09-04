@@ -1,6 +1,7 @@
 use object_store::buffered::BufWriter;
 use std::path::absolute;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
@@ -30,6 +31,7 @@ pub struct ElementSink {
     estimated_file_bytes: usize,
     target_record_batch_bytes: usize,
     target_file_bytes: usize,
+    pub last_write_cycle: Instant,
 }
 
 impl ElementSink {
@@ -56,6 +58,7 @@ impl ElementSink {
             estimated_file_bytes: 0usize,
             target_record_batch_bytes,
             target_file_bytes: args.file_target_mb * 1_000_000usize,
+            last_write_cycle: Instant::now(),
         })
     }
 
@@ -100,6 +103,7 @@ impl ElementSink {
     }
 
     pub async fn increment_and_cycle(&mut self) -> Result<(), anyhow::Error> {
+        self.last_write_cycle = Instant::now();
         if self.estimated_record_batch_bytes >= self.target_record_batch_bytes {
             self.finish_batch().await?;
         }
