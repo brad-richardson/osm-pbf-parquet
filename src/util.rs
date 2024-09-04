@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 use std::sync::OnceLock;
 use sysinfo::System;
 
@@ -5,6 +6,9 @@ use clap::Parser;
 
 // Write once, safe read across threads
 pub static ARGS: OnceLock<Args> = OnceLock::new();
+
+// Element counter to track read progress
+pub static ELEMENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // Max recommended size of an uncompressed single blob is 16MB, assumes compression ratio of 2:1 or better
 pub const DEFAULT_BUF_READER_SIZE: usize = 1024 * 1024 * 8;
@@ -24,6 +28,10 @@ pub struct Args {
     /// Zstd compression level, 1-22, 0 for no compression
     #[arg(long, default_value_t = 3)]
     pub compression: u8,
+
+    /// Worker thread count, default CPU count
+    #[arg(long)]
+    pub worker_threads: Option<usize>,
 
     /// Override target record batch size, balance this with available memory
     /// default is total memory (MB) / CPU count / 8
@@ -45,6 +53,7 @@ impl Args {
             input,
             output,
             compression,
+            worker_threads: None,
             record_batch_target_mb: None,
             max_row_group_count: None,
             file_target_mb: 500usize,
@@ -56,4 +65,9 @@ pub fn default_record_batch_size_mb() -> usize {
     let system = System::new_all();
     // Estimate per thread available memory, leaving overhead for copies and system processes
     return ((system.total_memory() as usize / 1_000_000usize) / system.cpus().len()) / 8usize;
+}
+
+pub fn default_worker_thread_count() -> usize {
+    let system = System::new_all();
+    return system.cpus().len();
 }
