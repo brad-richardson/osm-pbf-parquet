@@ -15,7 +15,7 @@ use url::Url;
 use crate::osm_arrow::osm_arrow_schema;
 use crate::osm_arrow::OSMArrowBuilder;
 use crate::osm_arrow::OSMType;
-use crate::util::{default_record_batch_size_mb, ARGS};
+use crate::util::ARGS;
 
 pub struct ElementSink {
     // Config for writing file
@@ -42,11 +42,6 @@ impl ElementSink {
         let buf_writer = Self::create_buf_writer(&full_path)?;
         let writer = Self::create_writer(buf_writer, args.compression, args.max_row_group_count)?;
 
-        let target_record_batch_bytes = args
-            .record_batch_target_mb
-            .unwrap_or(default_record_batch_size_mb())
-            * 1_000_000usize;
-
         Ok(ElementSink {
             osm_type,
             filenum,
@@ -56,8 +51,8 @@ impl ElementSink {
 
             estimated_record_batch_bytes: 0usize,
             estimated_file_bytes: 0usize,
-            target_record_batch_bytes,
-            target_file_bytes: args.file_target_mb * 1_000_000usize,
+            target_record_batch_bytes: args.get_record_batch_target_bytes(),
+            target_file_bytes: args.get_file_target_bytes(),
             last_write_cycle: Instant::now(),
         })
     }

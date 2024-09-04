@@ -45,11 +45,11 @@ cargo run --release -- --input your.osm.pbf --output ./parquet
 
 
 ## Benchmarks
-osm-pbf-parquet prioritizes transcode speed over file size, file count or perserving ordering. Here is a comparison against similar tools on the 2024-06-24 OSM planet PBF:
+osm-pbf-parquet prioritizes transcode speed over file size, file count or perserving ordering. Here is a comparison against similar tools on the 2024-06-24 OSM planet PBF with target file size of 500MB:
 | | Time (wall) | Output size | File count |
 | - | - | - | - |
-| **osm-pbf-parquet** (zstd:3) | 36 minutes | 182GB | 600 |
-| **osm-pbf-parquet** (zstd:9) | 72 minutes | 165GB | 600 |
+| **osm-pbf-parquet** (zstd:3) | 30 minutes | 182GB | ~600 |
+| **osm-pbf-parquet** (zstd:9) | 60 minutes | 165GB | ~600 |
 | [osm-parquetizer](https://github.com/adrianulbona/osm-parquetizer) | 196 minutes | 285GB | 3 |
 | [osm2orc](https://github.com/mojodna/osm2orc) | 385 minutes | 110GB | 1 |
 

@@ -20,9 +20,7 @@ pub mod sink;
 pub mod util;
 use crate::osm_arrow::OSMType;
 use crate::sink::ElementSink;
-use crate::util::{
-    default_worker_thread_count, Args, ARGS, DEFAULT_BUF_READER_SIZE, ELEMENT_COUNTER,
-};
+use crate::util::{Args, ARGS, ELEMENT_COUNTER};
 
 type SinkpoolStore = HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>;
 
@@ -92,7 +90,7 @@ async fn create_s3_buf_reader(url: Url) -> Result<BufReader, anyhow::Error> {
     Ok(BufReader::with_capacity(
         Arc::new(s3_store),
         &meta,
-        DEFAULT_BUF_READER_SIZE,
+        ARGS.get().unwrap().get_input_buffer_size_bytes(),
     ))
 }
 
@@ -104,7 +102,7 @@ async fn create_local_buf_reader(path: &str) -> Result<BufReader, anyhow::Error>
     Ok(BufReader::with_capacity(
         Arc::new(local_store),
         &meta,
-        DEFAULT_BUF_READER_SIZE,
+        ARGS.get().unwrap().get_input_buffer_size_bytes(),
     ))
 }
 
@@ -124,11 +122,7 @@ async fn process_blobs(
     ]));
 
     // Avoid too many tasks in memory
-    let active_tasks = 2 * ARGS
-        .get()
-        .unwrap()
-        .worker_threads
-        .unwrap_or(default_worker_thread_count());
+    let active_tasks = (1.5 * ARGS.get().unwrap().get_worker_threads() as f32) as usize;
     let semaphore = Arc::new(Semaphore::new(active_tasks));
 
     let mut join_set = JoinSet::new();
