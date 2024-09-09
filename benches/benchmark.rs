@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use osm_pbf_parquet::driver;
+use osm_pbf_parquet::pbf_driver;
 use osm_pbf_parquet::util::Args;
 use std::fs;
 
@@ -9,7 +9,7 @@ async fn bench() {
         "./test/bench-out/".to_string(),
         0,
     );
-    driver(args).await.unwrap();
+    pbf_driver(args).await.unwrap();
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {

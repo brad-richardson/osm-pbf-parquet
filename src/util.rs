@@ -1,8 +1,15 @@
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 use sysinfo::System;
 
 use clap::Parser;
+
+use crate::osm_arrow::OSMType;
+use crate::ElementSink;
+
+pub type SinkpoolStore = HashMap<OSMType, Arc<Mutex<Vec<ElementSink>>>>;
 
 // Write once, safe read across threads
 pub static ARGS: OnceLock<Args> = OnceLock::new();

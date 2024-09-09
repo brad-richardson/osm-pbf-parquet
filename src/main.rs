@@ -1,7 +1,7 @@
 use clap::Parser;
 use env_logger::{Builder, Env};
 
-use osm_pbf_parquet::driver;
+use osm_pbf_parquet::pbf_driver;
 use osm_pbf_parquet::util::Args;
 
 fn main() {
@@ -16,6 +16,6 @@ fn main() {
         .build()
         .unwrap()
         .block_on(async {
-            let _ = driver(args).await;
+            let _ = pbf_driver(args).await;
         });
 }
