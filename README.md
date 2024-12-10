@@ -1,3 +1,7 @@
+# ⚠️ ARCHIVED ⚠️
+
+## This tool has been migrated to the [Overture Maps org](https://github.com/OvertureMaps/osm-pbf-parquet) and future development will occur there.
+
 ## osm-pbf-parquet
 Transcode OSM PBF file to parquet files with hive-style partitioning by type:
 ```
